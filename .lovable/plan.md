@@ -1,130 +1,231 @@
 
 
-# PageSpeed Insights Report & Security Fixes
+# Integrasi WhatsApp + RAG + LLM — Arsitektur & Rencana MVP
 
-## PageSpeed Scores (Mobile)
+## Kondisi Saat Ini
 
-| Metric | Score |
-|--------|-------|
-| Performa | 76/100 |
-| Aksesibilitas | 85/100 |
-| Praktik Terbaik | 92/100 |
-| SEO | 100/100 |
-
-### Performance Metrics
-
-| Metric | Nilai | Status |
-|--------|-------|--------|
-| First Contentful Paint | 1.8 dtk | Kuning |
-| Largest Contentful Paint | 4.1 dtk | Merah |
-| Total Blocking Time | 70 md | Hijau |
-| Cumulative Layout Shift | 0 | Hijau |
-| Speed Index | 9.8 dtk | Merah |
+| Komponen | Status |
+|----------|--------|
+| Dashboard (Clients, Device, Knowledge Base, Monitoring) | UI siap |
+| Database (clients, wa_sessions, documents, message_logs) | Siap + pgvector aktif |
+| Storage bucket "knowledge" | Siap |
+| Edge functions (process-document, test-rag) | Belum dibuat |
+| WhatsApp bridge/server | Belum ada |
+| LLM | Lovable AI tersedia (LOVABLE_API_KEY sudah ada) |
 
 ---
 
-## Masalah yang Ditemukan & Rencana Perbaikan
+## Arsitektur Keseluruhan
 
-### 1. Performance: Font Loading Blocking Render (LCP 4.1 dtk)
-
-Google Fonts di-import via CSS `@import` yang memblokir render selama 750 md. Font juga menjadi bagian dari critical request chain (8.7 dtk total).
-
-**Fix:**
-- Pindahkan Google Fonts dari `@import` di `src/index.css` ke `<link>` di `index.html` dengan `rel="preconnect"` dan `display=swap`
-- Tambahkan `<link rel="preconnect">` ke `fonts.googleapis.com` dan `fonts.gstatic.com`
-
-**File:** `index.html`, `src/index.css`
-
-### 2. Performance: Logo Oversized (23 KiB bisa hemat 22.5 KiB)
-
-Logo `logo_mantra_horizontal.png` berukuran asli 1920x366 tapi ditampilkan 210x40. Terlalu besar.
-
-**Fix:**
-- Tambahkan atribut `width` dan `height` yang sesuai (sudah ada)
-- Tidak bisa resize file PNG dari sini, tapi bisa tambahkan `fetchpriority="high"` pada logo di Navbar karena itu di viewport awal
-- Tambahkan `loading="lazy"` pada logo di Footer (sudah ada)
-
-### 3. Performance: CSP font-src Blocking cdn.gpteng.co
-
-Console error: font dari `cdn.gpteng.co` diblokir oleh CSP. Ini dari platform Lovable, bukan dari kode kita. Tidak bisa di-fix dari sisi kita karena CSP di meta tag.
-
-**Fix:** Tambahkan `https://cdn.gpteng.co` ke `font-src` di CSP meta tag agar tidak error di console.
-
-### 4. Performance: CSP via meta tag warnings
-
-`frame-ancestors` dan `X-Frame-Options` tidak bisa diset via `<meta>` tag. Hanya efektif via HTTP header.
-
-**Fix:** Hapus `frame-ancestors` dari CSP meta tag dan hapus `X-Frame-Options` meta tag karena keduanya tidak berfungsi dari meta. Ini menghilangkan 2 console errors.
-
-### 5. Aksesibilitas: Tombol tanpa nama (skor 85)
-
-- Mobile menu toggle button tidak punya `aria-label`
-- Pricing toggle button tidak punya `aria-label`
-- Slider di ROI Calculator dan Admin Cost Calculator tidak punya `aria-label`
-
-**Fix:**
-- Tambahkan `aria-label="Buka menu navigasi"` ke mobile toggle di `Navbar.tsx`
-- Tambahkan `aria-label="Toggle harga tahunan"` ke pricing toggle di `Pricing.tsx`
-- Tambahkan `aria-label` ke Slider di `ROICalculator.tsx` dan `AdminCostCalculator.tsx`
-
-### 6. Aksesibilitas: Kontras warna rendah
-
-Banyak elemen gagal kontras, terutama:
-- `text-primary` (orange) di background terang -- kurang kontras
-- `text-muted-foreground` di background terang
-- `text-primary-foreground` di `bg-primary`
-
-**Fix:**
-- Gelapkan `--primary` sedikit agar kontras lebih baik: dari `24 95% 53%` ke `24 95% 45%`
-- Gelapkan `--muted-foreground` dari `220 9% 46%` ke `220 9% 40%`
-
-### 7. Aksesibilitas: Heading order tidak berurutan
-
-Footer menggunakan `<h4>` tanpa `<h3>` sebelumnya, melanggar heading hierarchy.
-
-**Fix:** Ganti `<h4>` di Footer menjadi `<p>` atau `<h3>` yang proper.
-
-### 8. Aksesibilitas: Tidak ada `<main>` landmark
-
-Halaman tidak punya `<main>` element.
-
-**Fix:** Wrap konten di `Index.tsx` dengan `<main>`.
-
-### 9. Security Findings (4 items dari scan)
-
-Scanner masih melaporkan 4 tabel "publicly readable" karena policy menggunakan `RESTRICTIVE` tanpa `PERMISSIVE`. Secara teknis ini false positive karena tanpa PERMISSIVE policy, default deny berlaku -- artinya `anon` tetap tidak bisa baca data.
-
-**Fix:** Mark semua 4 findings sebagai ignored dengan penjelasan teknis bahwa RESTRICTIVE-only policies default to deny untuk anon users.
-
-### 10. Security: Leaked Password Protection (warning)
-
-**Status:** Non-blocker warning. Tetap di-note tapi tidak perlu action karena ini setting di level platform.
+```text
+HP Konsumen (WhatsApp)
+        |
+        v
+WhatsApp Cloud API (Meta) -- gratis 1000 percakapan/bulan
+        |
+        v (webhook)
+Edge Function: wa-webhook
+        |
+        +---> Cari dokumen relevan (pgvector similarity search)
+        +---> Kirim ke Lovable AI (gemini-2.5-flash-lite) --> jawaban
+        +---> Kirim balik via WhatsApp Cloud API
+        +---> Log ke message_logs + kurangi quota
+```
 
 ---
 
-## Ringkasan Perubahan File
+## Opsi WhatsApp Integration (Murah/Gratis)
 
-| File | Perubahan |
-|------|-----------|
-| `index.html` | Tambah `preconnect` fonts, perbaiki CSP (tambah `cdn.gpteng.co` di font-src, hapus `frame-ancestors`), hapus `X-Frame-Options` meta |
-| `src/index.css` | Hapus `@import` Google Fonts (pindah ke HTML) |
-| `src/pages/Index.tsx` | Wrap content dengan `<main>` |
-| `src/components/landing/Navbar.tsx` | Tambah `aria-label` ke mobile toggle |
-| `src/components/landing/Pricing.tsx` | Tambah `aria-label` ke toggle button |
-| `src/components/landing/ROICalculator.tsx` | Tambah `aria-label` ke Slider |
-| `src/components/landing/AdminCostCalculator.tsx` | Tambah `aria-label` ke Slider |
-| `src/components/landing/Footer.tsx` | Ubah `<h4>` ke `<p>` dengan styling yang sama |
-| CSS variables | Gelapkan `--primary` dan `--muted-foreground` untuk kontras lebih baik |
-| Security findings | Mark 4 false-positive RLS findings sebagai ignored |
+### Opsi 1: Meta WhatsApp Cloud API (REKOMENDASI)
+
+| Aspek | Detail |
+|-------|--------|
+| Biaya | Gratis 1000 percakapan/bulan (service conversations) |
+| Keandalan | Official API, tidak akan di-ban |
+| Setup | Perlu Facebook Business account + verifikasi |
+| Cocok untuk | Production, MVP, testing |
+
+Langkah setup:
+1. Buat akun di [developers.facebook.com](https://developers.facebook.com)
+2. Buat app baru -> pilih "Business" -> tambahkan WhatsApp product
+3. Dapatkan **Phone Number ID**, **WhatsApp Business Account ID**, dan **Permanent Access Token**
+4. Set webhook URL ke edge function kita
+5. Nomor test (082125086328) bisa didaftarkan sebagai test number
+
+### Opsi 2: whatsapp-web.js / Baileys (Gratis tapi berisiko)
+
+| Aspek | Detail |
+|-------|--------|
+| Biaya | Gratis |
+| Keandalan | Unofficial, risiko ban dari WhatsApp |
+| Setup | Perlu VPS terpisah (Node.js server) |
+| Cocok untuk | Prototype saja, TIDAK untuk production |
+
+### Rekomendasi: Opsi 1 (Meta Cloud API)
+
+Untuk testing dengan nomor 082125086328, Meta Cloud API menyediakan sandbox mode gratis.
 
 ---
 
-## Estimasi Dampak
+## LLM: Strategi Hemat + Anti-Halusinasi
 
-| Metric | Sebelum | Target |
-|--------|---------|--------|
-| Performance | 76 | 82-88 (font fix + CSP cleanup) |
-| Aksesibilitas | 85 | 95+ (aria-labels + kontras + landmarks) |
-| Praktik Terbaik | 92 | 95+ (console errors fixed) |
-| SEO | 100 | 100 (tetap) |
+### Model yang dipakai: `google/gemini-2.5-flash-lite`
+
+| Aspek | Detail |
+|-------|--------|
+| Biaya | Paling murah di Lovable AI |
+| Kecepatan | Paling cepat |
+| Cocok untuk | Menjawab pertanyaan berdasarkan konteks dokumen |
+
+### Strategi Anti-Halusinasi (RAG Guardrails)
+
+1. **System prompt ketat**: AI hanya boleh menjawab berdasarkan konteks yang diberikan
+2. **Similarity threshold**: Jika skor kesamaan dokumen < 0.7, jangan jawab — balas "Maaf, saya belum punya info tentang itu. Silakan hubungi admin langsung."
+3. **Fallback message**: Jika tidak ada dokumen yang relevan, kirim pesan default + nomor admin
+4. **Temperature 0**: Tidak ada kreativitas, jawab apa adanya
+5. **Max tokens dibatasi**: Jawaban singkat dan padat (max 300 tokens)
+
+System prompt contoh:
+```
+Kamu adalah asisten customer service untuk {nama_bisnis}.
+Jawab HANYA berdasarkan informasi berikut. Jika jawabannya tidak ada di informasi ini, katakan "Maaf kak, untuk pertanyaan ini silakan hubungi admin kami langsung ya."
+Gunakan bahasa santai dan ramah seperti chat WhatsApp. Panggil customer "kak".
+JANGAN mengarang informasi. JANGAN membuat harga atau produk yang tidak ada di informasi.
+
+INFORMASI:
+{konteks_dari_dokumen}
+```
+
+---
+
+## RAG Pipeline yang Dibangun
+
+### Edge Function 1: `process-document`
+
+Dipanggil setelah file di-upload ke storage.
+
+```text
+File PDF/TXT di storage
+    |
+    v
+Parse teks (PDF -> text)
+    |
+    v
+Chunking (split per ~500 karakter dengan overlap 50)
+    |
+    v
+Embedding via Lovable AI (gemini model)
+    |
+    v
+Simpan ke tabel documents (content, embedding, chunk_index)
+    |
+    v
+Update status -> "ready"
+```
+
+Catatan: Karena Lovable AI tidak menyediakan embedding API secara langsung, kita akan menggunakan pendekatan alternatif — simpan teks chunks saja tanpa vector embedding, lalu gunakan keyword search (full-text search PostgreSQL) sebagai MVP. Ini lebih sederhana dan gratis.
+
+### Edge Function 2: `test-rag`
+
+Dipanggil dari dashboard Test Bot dan dari wa-webhook.
+
+```text
+Pertanyaan masuk
+    |
+    v
+Full-text search di tabel documents (filter by client_id)
+    |
+    v
+Ambil top 3 chunks paling relevan
+    |
+    v
+Kirim ke Lovable AI (gemini-2.5-flash-lite) dengan system prompt ketat
+    |
+    v
+Return jawaban
+```
+
+### Edge Function 3: `wa-webhook`
+
+Menerima pesan masuk dari WhatsApp Cloud API.
+
+```text
+Webhook POST dari Meta
+    |
+    v
+Validasi signature
+    |
+    v
+Cek client_id dari nomor WA terdaftar
+    |
+    v
+Cek quota_remaining > 0
+    |  (jika habis -> balas "Maaf, silakan hubungi admin")
+    v
+Panggil RAG pipeline (sama seperti test-rag)
+    |
+    v
+Kirim jawaban via WhatsApp Cloud API
+    |
+    v
+Update message_logs + kurangi quota
+```
+
+---
+
+## MVP yang Bisa Langsung Dibangun (Tanpa WhatsApp Dulu)
+
+Jika setup Meta WhatsApp Cloud API belum siap, kita bisa bangun dan test semuanya dari dashboard dulu:
+
+### Fase 1: Backend RAG (bisa langsung)
+
+1. **Edge function `process-document`**: Parse file, chunking, simpan ke database
+2. **Edge function `test-rag`**: Full-text search + Lovable AI untuk jawab pertanyaan
+3. **Test dari dashboard**: Upload dokumen -> test bot -> validasi jawaban
+
+### Fase 2: WhatsApp Integration (setelah Meta API siap)
+
+4. **Edge function `wa-webhook`**: Terima pesan, panggil RAG, balas via API
+5. **Update DeviceManager**: Tampilkan status koneksi dari Meta Cloud API
+6. **Monitoring**: Log semua pesan dan token usage
+
+---
+
+## Error Handling & Fallback MVP
+
+| Skenario Error | Fallback |
+|----------------|----------|
+| LLM gagal/timeout | Balas: "Maaf kak, sistem sedang sibuk. Coba lagi ya." |
+| Tidak ada dokumen relevan | Balas: "Maaf kak, saya belum punya info itu. Hubungi admin di [nomor]." |
+| Quota habis | Balas: "Maaf kak, layanan otomatis sedang tidak tersedia. Hubungi [nomor]." |
+| Rate limit (429) | Retry 1x setelah 2 detik, lalu fallback message |
+| Dokumen gagal diproses | Update status ke "error", tampilkan di dashboard |
+
+---
+
+## Rencana Implementasi (Fase 1 — Langsung Bisa Dikerjakan)
+
+| # | Task | File |
+|---|------|------|
+| 1 | Tambah kolom `ts_content` (tsvector) ke tabel documents untuk full-text search | Migration SQL |
+| 2 | Buat edge function `process-document` (parse, chunk, simpan) | `supabase/functions/process-document/index.ts` |
+| 3 | Buat edge function `test-rag` (search + LLM) | `supabase/functions/test-rag/index.ts` |
+| 4 | Update `supabase/config.toml` untuk register kedua functions | `supabase/config.toml` |
+| 5 | Test upload dokumen + test bot dari dashboard | Verify end-to-end |
+
+### Fase 2 (Setelah Meta API Ready)
+
+| # | Task | File |
+|---|------|------|
+| 6 | Buat edge function `wa-webhook` | `supabase/functions/wa-webhook/index.ts` |
+| 7 | Tambah secrets: META_WA_TOKEN, META_PHONE_NUMBER_ID, META_VERIFY_TOKEN | Secrets |
+| 8 | Update DeviceManager UI untuk Meta Cloud API flow | `src/pages/admin/DeviceManager.tsx` |
+
+---
+
+## Yang Perlu Kamu Siapkan
+
+Untuk **Fase 1** (RAG): Tidak perlu apa-apa, langsung bisa dikerjakan karena Lovable AI sudah tersedia.
+
+Untuk **Fase 2** (WhatsApp): Perlu buat akun di [Meta for Developers](https://developers.facebook.com) dan setup WhatsApp Business API. Saya akan bantu panduan langkah-langkahnya nanti.
 
