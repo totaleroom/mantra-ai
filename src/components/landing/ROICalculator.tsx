@@ -37,7 +37,7 @@ const ROICalculator = () => {
             <Slider value={hoursPerDay} onValueChange={setHoursPerDay} min={1} max={12} step={1} />
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 sm:grid-cols-2">
             {[
               { icon: Clock, label: "Jam dihemat/bulan", value: `${hoursSavedMonth} jam` },
               { icon: DollarSign, label: "Nilai waktu dihemat", value: formatRp(moneySaved) },
@@ -46,7 +46,7 @@ const ROICalculator = () => {
             ].map((item) => (
               <div key={item.label} className="rounded-xl border border-border bg-background p-4 text-center">
                 <item.icon size={20} className="mx-auto mb-2 text-primary" />
-                <p className="font-mono text-2xl font-bold text-foreground">{item.value}</p>
+                <p className="font-mono text-xl font-bold text-foreground truncate">{item.value}</p>
                 <p className="mt-1 text-xs text-muted-foreground">{item.label}</p>
               </div>
             ))}
