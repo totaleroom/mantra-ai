@@ -45,10 +45,11 @@ const HowItWorks = () => {
             Cara Kerja
           </span>
           <h2 className="mb-4 text-3xl font-extrabold tracking-tight text-foreground md:text-4xl">
-            Semudah 1-2-3
+            Kami yang Setup.{" "}
+            <span className="text-primary">Anda Tinggal Pakai.</span>
           </h2>
           <p className="text-muted-foreground">
-            Anda gak perlu ngerti teknisnya. Kami yang urus semuanya.
+            Tanpa ribet prompting. Tim kami setup dari nol sampai siap jalan. Anda cukup gunakan.
           </p>
         </div>
 

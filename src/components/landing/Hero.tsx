@@ -15,13 +15,13 @@ const Hero = () => {
             </div>
 
             <h1 className="mb-6 text-4xl font-extrabold leading-[1.1] tracking-tight text-foreground md:text-5xl lg:text-6xl">
-              Pasang Karyawan Gaib.{" "}
-              <span className="text-primary">Kerja 24 Jam, Tanpa THR.</span>
+              Bukan Cuma Balas Chat.{" "}
+              <span className="text-primary">MANTRA Bisa Closing Penjualan.</span>
             </h1>
 
             <p className="mb-8 text-lg leading-relaxed text-muted-foreground">
-              MANTRA adalah asisten AI yang menjawab chat pelanggan, kelola stok, dan buat konten marketing — 
-              otomatis. Bapak/Ibu tinggal fokus kembangkan usaha.
+              AI yang beneran bisa eksekusi — closing, booking, cek ongkir, terima pembayaran. 
+              Kualitas setara sales terbaik, kerja 24/7 tanpa libur.
             </p>
 
             <div className="flex flex-wrap gap-3">

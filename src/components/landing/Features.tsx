@@ -55,10 +55,11 @@ const Features = () => {
             Peralatan MANTRA
           </span>
           <h2 className="mb-4 text-3xl font-extrabold tracking-tight text-foreground md:text-4xl">
-            3 Alat Bantu untuk Kembangkan Usaha
+            AI yang Bekerja Seperti{" "}
+            <span className="text-primary">Sales Terbaik Anda</span>
           </h2>
           <p className="text-muted-foreground">
-            Setiap alat dirancang khusus untuk kebutuhan UMKM Indonesia.
+            Natural, penuh empati, dan punya insting upsell & cross-sell — bukan robot kaku.
           </p>
         </div>
 
