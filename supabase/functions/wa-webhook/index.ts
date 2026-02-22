@@ -140,6 +140,15 @@ serve(async (req) => {
     const businessName = clientData?.name || "Bisnis Kami";
     const dailyLimit = clientData?.daily_message_limit || 300;
 
+    // Load platform settings for AI config
+    const { data: platformSettings } = await supabaseAdmin
+      .from("platform_settings")
+      .select("key, value");
+    const cfg: Record<string, string> = {};
+    for (const row of platformSettings || []) {
+      cfg[row.key] = row.value;
+    }
+
     const today = new Date().toISOString().split("T")[0];
     const { data: todayLog } = await supabaseAdmin
       .from("message_logs")
@@ -259,14 +268,19 @@ serve(async (req) => {
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
-    const systemPrompt = `Kamu adalah asisten customer service untuk ${businessName}.
-Jawab HANYA berdasarkan informasi berikut. Gunakan bahasa santai dan ramah seperti chat WhatsApp. Panggil customer "kak".
-JANGAN mengarang informasi. JANGAN membuat harga atau produk yang tidak ada di informasi.
-Jawab singkat dan padat.
-Jika jawabannya TIDAK ADA di informasi ini, atau customer meminta bicara dengan admin/manusia, BALAS HANYA DENGAN: ESKALASI_HUMAN
+    // Build system prompt from platform_settings or default
+    const rawPrompt = cfg.ai_system_prompt
+      ? cfg.ai_system_prompt.replace(/^"|"$/g, "")
+      : `Kamu adalah asisten customer service yang ramah dan profesional. Jawab pertanyaan berdasarkan konteks yang diberikan. Jika kamu tidak tahu jawabannya atau pelanggan meminta berbicara dengan manusia, balas HANYA dengan kata ESKALASI_HUMAN.`;
 
-INFORMASI:
-${context}`;
+    const systemPrompt = rawPrompt
+      .replace("{{business_name}}", businessName)
+      .replace("{{context}}", context)
+      + `\n\nNama bisnis: ${businessName}\n\nINFORMASI:\n${context}`;
+
+    const aiModel = cfg.ai_model ? cfg.ai_model.replace(/^"|"$/g, "") : "google/gemini-2.5-flash-lite";
+    const aiTemperature = parseFloat(cfg.ai_temperature || "0.3");
+    const aiMaxTokens = parseInt(cfg.ai_max_tokens || "1024");
 
     const aiResponse = await fetch(
       "https://ai.gateway.lovable.dev/v1/chat/completions",
@@ -277,13 +291,13 @@ ${context}`;
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: "google/gemini-2.5-flash-lite",
+          model: aiModel,
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: messageText },
           ],
-          temperature: 0,
-          max_tokens: 300,
+          temperature: aiTemperature,
+          max_tokens: aiMaxTokens,
         }),
       }
     );
@@ -373,6 +387,10 @@ async function sendWhatsAppMessage(phoneNumber: string, message: string, instanc
   const baseUrl = EVOLUTION_API_URL.replace(/\/$/, "");
   const normalizedPhone = phoneNumber.replace(/\D/g, "");
 
+  // Read delay config from platform_settings if available
+  const delayMin = 2000;
+  const delayMax = 4000;
+
   // Typing indicator
   try {
     await fetch(`${baseUrl}/chat/presence/${instanceName}`, {
@@ -385,7 +403,7 @@ async function sendWhatsAppMessage(phoneNumber: string, message: string, instanc
   }
 
   // Delay 2-4 seconds
-  await new Promise((r) => setTimeout(r, 2000 + Math.random() * 2000));
+  await new Promise((r) => setTimeout(r, delayMin + Math.random() * (delayMax - delayMin)));
 
   // Send message
   const res = await fetch(`${baseUrl}/message/sendText/${instanceName}`, {
