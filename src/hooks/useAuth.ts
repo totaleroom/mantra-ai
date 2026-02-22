@@ -46,6 +46,11 @@ export function useAuth() {
     if (error) throw error;
   };
 
+  const signUp = async (email: string, password: string) => {
+    const { error } = await supabase.auth.signUp({ email, password });
+    if (error) throw error;
+  };
+
   const signOut = async () => {
     await supabase.auth.signOut();
     setUser(null);
@@ -53,5 +58,5 @@ export function useAuth() {
     setIsAdmin(false);
   };
 
-  return { user, session, isAdmin, loading, signIn, signOut };
+  return { user, session, isAdmin, loading, signIn, signUp, signOut };
 }
