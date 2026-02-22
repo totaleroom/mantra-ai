@@ -1,4 +1,4 @@
-import { Users, Smartphone, BookOpen, BarChart3, LogOut } from "lucide-react";
+import { Users, Smartphone, BookOpen, BarChart3, LogOut, MessageSquare } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/hooks/useAuth";
 import logoHorizontal from "@/assets/logo_mantra_horizontal.png";
@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 
 const navItems = [
   { title: "Clients", url: "/admin/clients", icon: Users },
+  { title: "Inbox", url: "/admin/inbox", icon: MessageSquare },
   { title: "Device & Connection", url: "/admin/devices", icon: Smartphone },
   { title: "Knowledge Base", url: "/admin/knowledge", icon: BookOpen },
   { title: "Monitoring", url: "/admin/monitoring", icon: BarChart3 },
