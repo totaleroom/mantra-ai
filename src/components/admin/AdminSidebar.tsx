@@ -27,7 +27,7 @@ export default function AdminSidebar() {
   return (
     <Sidebar>
       <div className="flex h-16 items-center border-b border-sidebar-border px-4">
-        <img src={logoHorizontal} alt="Mantra AI" className="h-7" />
+        <img src={logoHorizontal} alt="Mantra AI" className="h-7" width={105} height={28} />
       </div>
 
       <SidebarContent>
