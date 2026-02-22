@@ -4,7 +4,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
 serve(async (req) => {
@@ -12,6 +12,39 @@ serve(async (req) => {
     return new Response(null, { headers: corsHeaders });
 
   try {
+    // Auth check
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader?.startsWith("Bearer ")) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const supabaseAuth = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_ANON_KEY")!,
+      { global: { headers: { Authorization: authHeader } } }
+    );
+
+    const token = authHeader.replace("Bearer ", "");
+    const { data: claimsData, error: claimsError } = await supabaseAuth.auth.getClaims(token);
+    if (claimsError || !claimsData?.claims) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Verify admin role
+    const { data: isAdmin } = await supabaseAuth.rpc("is_admin");
+    if (!isAdmin) {
+      return new Response(JSON.stringify({ error: "Forbidden" }), {
+        status: 403,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     const { document_id } = await req.json();
     if (!document_id) throw new Error("document_id is required");
 
@@ -43,11 +76,8 @@ serve(async (req) => {
     if (ext === "txt") {
       text = await fileData.text();
     } else if (ext === "pdf") {
-      // Simple PDF text extraction — extract readable text between stream markers
       const raw = await fileData.text();
-      // Try to get text from PDF — basic extraction
       const textParts: string[] = [];
-      // Match text between BT and ET operators, extract Tj/TJ strings
       const btEtRegex = /BT\s([\s\S]*?)ET/g;
       let match;
       while ((match = btEtRegex.exec(raw)) !== null) {
@@ -57,7 +87,6 @@ serve(async (req) => {
         while ((tjMatch = tjRegex.exec(block)) !== null) {
           textParts.push(tjMatch[1]);
         }
-        // TJ array
         const tjArrayRegex = /\[([^\]]*)\]\s*TJ/g;
         let tjArrMatch;
         while ((tjArrMatch = tjArrayRegex.exec(block)) !== null) {
@@ -71,9 +100,7 @@ serve(async (req) => {
       }
       text = textParts.join(" ").replace(/\s+/g, " ").trim();
 
-      // If basic extraction fails, use raw text fallback
       if (!text || text.length < 20) {
-        // Fallback: extract any readable ASCII sequences
         const bytes = new Uint8Array(await (await supabaseAdmin.storage.from("knowledge").download(filePath)).data!.arrayBuffer());
         const readable: string[] = [];
         let current = "";
@@ -93,7 +120,6 @@ serve(async (req) => {
     }
 
     if (!text || text.length < 10) {
-      // Mark as error if no text extracted
       await supabaseAdmin
         .from("documents")
         .update({ status: "error", content: "Gagal mengekstrak teks dari file." })
