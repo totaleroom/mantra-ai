@@ -1,112 +1,169 @@
 
 
-# Halaman Settings untuk Admin Dashboard
+# Visual Enhancement: MANTRA Control Center
 
-## Masalah
+Upgrade menyeluruh untuk UI admin dashboard agar sesuai standar "OCD-compliant" -- grid-based, problem-first, zero-noise.
 
-Saat ini ada banyak setting dan data yang hanya bisa diakses melalui database langsung, padahal seharusnya bisa dikelola dari dashboard:
+---
 
-| Setting | Lokasi Sekarang | Ada UI? |
-|---------|----------------|---------|
-| Quota limit per client | Tabel `clients.quota_limit` | Tidak -- hanya tampil, tidak bisa edit |
-| Quota remaining (reset/top-up) | Tabel `clients.quota_remaining` | Tidak |
-| Daily message limit | Tabel `clients.daily_message_limit` | Tidak |
-| Client status (active/inactive) | Tabel `clients.status` | Tidak |
-| User/Admin management | Tabel `user_roles` + auth.users | Tidak ada sama sekali |
-| Evolution API config | Secrets (env vars) | Tidak -- harus lewat Cloud |
-| AI System prompt template | Hardcoded di wa-webhook | Tidak |
-| WA Session management | Tabel `wa_sessions` | Ada (DeviceManager) |
+## 1. "Control Tower" Dashboard (Halaman Home Baru)
 
-## Solusi
+**File baru**: `src/pages/admin/Dashboard.tsx`
 
-### 1. Perluas Form Edit Client (di `Clients.tsx`)
+Menggantikan redirect langsung ke `/admin/clients`. Sekarang `/admin` menampilkan dashboard overview.
 
-Tambahkan field yang hilang di dialog Add/Edit Client:
-- **Quota Limit** (number input) -- batas kuota total
-- **Quota Remaining** (number input) -- sisa kuota, bisa di-reset manual
-- **Daily Message Limit** (number input, default 300) -- batas pesan harian
-- **Status** (select: active/inactive) -- aktifkan/nonaktifkan client
+**Layout**: Grid 3 kolom (desktop), 1 kolom (mobile), gap-6 konsisten.
 
-Ini memungkinkan admin mengatur semua parameter client tanpa buka database.
+**Widget 1 -- "Needs Attention" (kolom kiri atas, full-width)**
+- List compact dari: client dengan `status = 'inactive'` atau `quota_remaining <= 0`, dan conversations `handled_by = 'HUMAN'`
+- Styling: `border-destructive/30 bg-destructive/5` card, teks merah bold untuk jumlah
+- Setiap item punya link langsung ke Inbox atau Client edit
+- Jika kosong: tampilkan checkmark hijau "Semua Terkendali"
 
-### 2. Buat Halaman Settings (`/admin/settings`)
+**Widget 2 -- "System Health" (kolom kanan atas)**
+- Cek Evolution API connection (panggil manage-settings test)
+- Cek jumlah wa_sessions connected vs total
+- Tampilkan: icon checkmark hijau atau X merah per item
+- Compact card, tanpa shadow, border halus
 
-Halaman baru dengan tab-tab:
+**Widget 3 -- "Global Statistics" (full-width, bawah)**
+- 4 stat cards dalam grid: Total Active Clients, Messages Today, Active Conversations, Pending Escalations
+- Typography besar (text-3xl font-bold) untuk angka, label kecil di bawah
+- Border tipis, bg-card, tanpa shadow
 
-**Tab 1: Admin Users**
-- Tabel daftar admin (dari `user_roles` + email dari auth)
-- Tombol "Invite Admin" -- form email + password untuk signup admin baru
-- Tombol hapus admin (kecuali diri sendiri)
-- Menggunakan edge function baru `manage-admin` untuk create user + assign role secara aman (karena client-side tidak bisa akses `auth.admin`)
+**Routing change**: `src/App.tsx` -- ganti `<Navigate to="clients" replace />` menjadi `<Route index element={<Dashboard />} />`
 
-**Tab 2: WhatsApp / Evolution API**
-- Form input: Evolution API URL, API Key, Webhook Secret
-- Tombol "Test Connection" -- panggil edge function untuk verify koneksi
-- Info webhook URL yang harus di-set di Evolution API dashboard
-- Menggunakan edge function baru `manage-settings` untuk read/write settings secara aman (secrets tidak bisa diakses dari frontend, jadi kita buat tabel `platform_settings` untuk config yang non-secret, dan tetap pakai edge function untuk config secret)
+**Sidebar change**: Tambah "Dashboard" sebagai menu pertama di AdminSidebar (icon: LayoutDashboard)
 
-**Tab 3: AI Configuration**
-- System prompt template (textarea) -- bisa dikustomisasi per client atau global
-- Model selection (dropdown: gemini-2.5-flash-lite, gemini-2.5-flash, dll)
-- Temperature setting (slider 0-1)
-- Max tokens (number input)
-- Disimpan di tabel baru `platform_settings` (key-value store)
+---
 
-**Tab 4: Safety & Limits**
-- Default daily message limit untuk client baru
-- Default quota limit untuk client baru
-- Anti-ban delay range (min/max detik)
-- Escalation message template (textarea)
+## 2. "God Mode" Client List (Upgrade `Clients.tsx`)
 
-### 3. Tabel Database Baru: `platform_settings`
+**File**: `src/pages/admin/Clients.tsx` (overhaul)
 
-```
-platform_settings:
-  - id (uuid PK)
-  - key (text, unique) -- e.g. "ai_model", "default_quota", "escalation_message"
-  - value (text) -- JSON-encoded value
-  - updated_at (timestamptz)
-```
+**Perubahan visual:**
+- Layout tabel high-density: padding lebih kecil (`py-2 px-3`), font `text-sm`
+- Kolom baru: "Niche" (badge tag dari `industry`), "Active Chats" (count dari wa_conversations active), "Last Activity" (relative time dari `last_activity_at`)
+- Industry filter dropdown di samping search bar
+- Status filter dropdown (All / Connected / Disconnected / Kuota Habis)
 
-RLS: admin only. Ini untuk menyimpan config yang bisa diubah dari UI.
+**Inline Quick Actions per row:**
+- Dropdown menu (3 dot icon) dengan:
+  - Toggle Active/Inactive (switch langsung, update `clients.status`)
+  - View QR Code (buka modal DeviceManager mini -- fetch QR dari wa_sessions)
+  - Edit AI Prompt (buka modal textarea untuk custom prompt per client, simpan di field baru atau platform_settings)
+  - Edit Client (buka dialog form yang sudah ada)
+  - Delete (confirm dialog yang sudah ada)
 
-### 4. Edge Function Baru: `manage-admin`
+**Sort**: Default sort by `last_activity_at` desc (client paling aktif di atas)
 
-Untuk mengelola admin users secara aman:
-- POST: Create user baru via Supabase Admin API + assign role "admin"
-- DELETE: Hapus role admin (tidak hapus user)
-- GET: List semua admin (join user_roles dengan auth.users email)
+**Visual rules:**
+- Gunakan `border border-border` tanpa shadow
+- Badge warna untuk industry: F&B (orange), Salon (pink), Real Estate (blue), lainnya (gray)
+- Row hover: `hover:bg-muted/30`
+- Baris client inactive: `opacity-60`
 
-Perlu `SUPABASE_SERVICE_ROLE_KEY` karena create user membutuhkan admin access.
+---
 
-### 5. Edge Function Baru: `manage-settings`
+## 3. "Master" Knowledge Base (Upgrade `KnowledgeBase.tsx`)
 
-Untuk mengelola settings:
-- GET: Baca semua platform_settings
-- POST: Update/insert platform_settings
-- POST `/test-evolution`: Test koneksi ke Evolution API
+**File**: `src/pages/admin/KnowledgeBase.tsx` (overhaul)
+
+**Perubahan utama:**
+- **Unified view**: Tampilkan dokumen dari SEMUA client secara default, dengan filter dropdown per client
+- **Card-based layout**: Ganti table menjadi grid card (`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4`)
+- Setiap card menampilkan:
+  - Client name (badge di atas)
+  - Document title (font-medium)
+  - Role tag badge (warna: admin=blue, warehouse=amber, owner=purple, none=gray)
+  - Status badge
+  - Tanggal upload (text-xs)
+  - Delete button (icon, pojok kanan atas)
+- **Role tag inline edit**: Klik badge role_tag untuk toggle dropdown dan ubah langsung (update via supabase)
+- **Upload zone** tetap di atas: minimalis, drag-and-drop, dropdown "Target Client" + dropdown "Role Tag"
+- **Test chatbox** tetap di bawah
+
+---
+
+## 4. "Super Inbox" (Upgrade `Inbox.tsx` + components)
+
+**File**: `src/pages/admin/Inbox.tsx`, `src/components/admin/InboxSidebar.tsx`, `src/components/admin/InboxChat.tsx`
+
+**InboxSidebar perubahan:**
+- Group by Client Name first (collapsible sections per client)
+- HUMAN conversations: `bg-destructive/5 border-l-4 border-l-destructive` -- warna lebih tegas
+- AI conversations: clean, tanpa highlight
+- Icon yang lebih jelas: User icon merah untuk HUMAN, Bot icon biru untuk AI
+- Last message preview truncated 1 line
+- Timestamp relative ("5m ago") di pojok kanan atas setiap item
+
+**InboxChat perubahan:**
+- Chat bubbles lebih bersih:
+  - USER: align left, `bg-muted rounded-lg rounded-tl-none`
+  - AI: align right, `bg-primary/10 rounded-lg rounded-tr-none`
+  - ADMIN: align right, `bg-green-500/10 rounded-lg rounded-tr-none`
+- Sender label sebagai small badge di atas bubble (bukan di dalam)
+- Timestamp di bawah bubble, aligned sesuai sender
+- Input area: lebih bersih, rounded-full input untuk single line feel
+
+---
+
+## 5. "Visual Settings" (Upgrade `Settings.tsx`)
+
+**File**: `src/pages/admin/Settings.tsx`
+
+**Perubahan utama:**
+- **Prompt Presets**: Tambah fitur baru di tab "AI Configuration"
+  - Dropdown "Preset" di atas textarea system prompt
+  - 3 preset bawaan (disimpan di platform_settings):
+    - "Professional Seller" -- formal, fokus closing
+    - "Friendly Helper" -- santai, ramah
+    - "Custom" -- prompt manual
+  - Saat pilih preset, isi textarea otomatis. Saat edit manual, otomatis switch ke "Custom"
+  - Tombol "Save as Preset" untuk simpan prompt saat ini
+
+- **Visual toggles**: Gunakan Switch component untuk setting boolean (jika ada nanti)
+- **Grid layout**: Form fields dalam grid 2 kolom yang konsisten
+- **Section dividers**: Gunakan `Separator` antar section dalam setiap tab
+
+---
+
+## 6. Global Visual Polish
+
+**File**: `src/index.css` + `src/components/admin/AdminLayout.tsx`
+
+- **AdminLayout header**: Tambah breadcrumb atau page title di header bar
+- **Consistent spacing**: Semua page content pakai `p-6 space-y-6`
+- **Card style global**: `border border-border bg-card rounded-lg` tanpa shadow (hapus `shadow-sm` dari Card component atau override)
+- **Typography hierarchy**: h1 = `text-2xl font-bold`, section title = `text-sm font-semibold uppercase tracking-wide text-muted-foreground`
 
 ---
 
 ## Detail Teknis
 
 ### File baru:
-- `src/pages/admin/Settings.tsx` -- Halaman settings dengan tabs
-- `supabase/functions/manage-admin/index.ts` -- Edge function admin user management
-- `supabase/functions/manage-settings/index.ts` -- Edge function settings management
-- 1 migration file untuk tabel `platform_settings`
+- `src/pages/admin/Dashboard.tsx` -- Control Tower dashboard
 
 ### File yang dimodifikasi:
-- `src/pages/admin/Clients.tsx` -- Tambah field quota_limit, quota_remaining, daily_message_limit, status di form
-- `src/components/admin/AdminSidebar.tsx` -- Tambah menu "Settings" (icon: Settings/Cog)
-- `src/App.tsx` -- Tambah route `/admin/settings`
-- `supabase/functions/wa-webhook/index.ts` -- Baca system prompt, model, temperature dari platform_settings (bukan hardcoded)
+- `src/App.tsx` -- Tambah route Dashboard, ubah index redirect
+- `src/components/admin/AdminSidebar.tsx` -- Tambah menu Dashboard + realtime badge
+- `src/components/admin/AdminLayout.tsx` -- Header polish
+- `src/pages/admin/Clients.tsx` -- God Mode table + inline actions + filters
+- `src/pages/admin/KnowledgeBase.tsx` -- Card-based unified view + inline edit
+- `src/pages/admin/Inbox.tsx` -- Layout adjustments
+- `src/components/admin/InboxSidebar.tsx` -- Client grouping + visual upgrade
+- `src/components/admin/InboxChat.tsx` -- Chat bubble redesign
+- `src/pages/admin/Settings.tsx` -- Prompt presets + visual polish
+
+### Tidak perlu migration:
+- Semua data sudah tersedia di tabel yang ada
+- Prompt presets disimpan di `platform_settings` (key: `prompt_presets`, value: JSON array)
 
 ### Urutan implementasi:
-1. Migration tabel `platform_settings`
-2. Edge function `manage-admin` dan `manage-settings`
-3. Update form Client (tambah field)
-4. Buat halaman Settings dengan 4 tab
-5. Update routing + sidebar
-6. Update wa-webhook untuk baca config dari platform_settings
+1. Dashboard.tsx baru + routing + sidebar update
+2. Clients.tsx overhaul (table + filters + inline actions)
+3. KnowledgeBase.tsx overhaul (card view + inline edit)
+4. InboxSidebar + InboxChat visual upgrade
+5. Settings.tsx prompt presets
+6. Global polish (AdminLayout header, spacing consistency)
 
