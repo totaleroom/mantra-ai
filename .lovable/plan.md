@@ -1,150 +1,112 @@
 
 
-# Implementasi Tandem System (AI + Human Handoff) dengan Evolution API
+# Halaman Settings untuk Admin Dashboard
 
-## Ringkasan Perubahan dari Prompt Sebelumnya
+## Masalah
 
-Karena Meta WhatsApp Official API sulit didapatkan, sekarang menggunakan **Evolution API** (open-source REST API wrapper untuk WhatsApp Web). Ini selaras dengan fitur QR Code scan yang sudah ada di DeviceManager.
+Saat ini ada banyak setting dan data yang hanya bisa diakses melalui database langsung, padahal seharusnya bisa dikelola dari dashboard:
 
----
+| Setting | Lokasi Sekarang | Ada UI? |
+|---------|----------------|---------|
+| Quota limit per client | Tabel `clients.quota_limit` | Tidak -- hanya tampil, tidak bisa edit |
+| Quota remaining (reset/top-up) | Tabel `clients.quota_remaining` | Tidak |
+| Daily message limit | Tabel `clients.daily_message_limit` | Tidak |
+| Client status (active/inactive) | Tabel `clients.status` | Tidak |
+| User/Admin management | Tabel `user_roles` + auth.users | Tidak ada sama sekali |
+| Evolution API config | Secrets (env vars) | Tidak -- harus lewat Cloud |
+| AI System prompt template | Hardcoded di wa-webhook | Tidak |
+| WA Session management | Tabel `wa_sessions` | Ada (DeviceManager) |
 
-## Fase 1: Database Schema Baru
+## Solusi
 
-Buat 3 tabel baru + tambah kolom `role_tag` di tabel `documents`:
+### 1. Perluas Form Edit Client (di `Clients.tsx`)
 
-**Tabel `wa_customers`**
-- `id` uuid PK
-- `client_id` uuid FK -> clients
-- `phone_number` text (unique per client via unique constraint)
-- `name` text nullable
-- `created_at` timestamptz
+Tambahkan field yang hilang di dialog Add/Edit Client:
+- **Quota Limit** (number input) -- batas kuota total
+- **Quota Remaining** (number input) -- sisa kuota, bisa di-reset manual
+- **Daily Message Limit** (number input, default 300) -- batas pesan harian
+- **Status** (select: active/inactive) -- aktifkan/nonaktifkan client
 
-**Tabel `wa_conversations`**
-- `id` uuid PK
-- `client_id` uuid FK -> clients
-- `customer_id` uuid FK -> wa_customers
-- `handled_by` text default 'AI' (values: 'AI', 'HUMAN')
-- `status` text default 'active' (values: 'active', 'closed')
-- `created_at` timestamptz
-- `updated_at` timestamptz
+Ini memungkinkan admin mengatur semua parameter client tanpa buka database.
 
-**Tabel `wa_messages`**
-- `id` uuid PK
-- `conversation_id` uuid FK -> wa_conversations
-- `sender` text (values: 'USER', 'AI', 'ADMIN')
-- `content` text
-- `created_at` timestamptz
+### 2. Buat Halaman Settings (`/admin/settings`)
 
-**Perubahan tabel `documents`**
-- Tambah kolom `role_tag` text nullable (values: 'admin', 'warehouse', 'owner')
+Halaman baru dengan tab-tab:
 
-Semua tabel baru mendapat:
-- RLS policy PERMISSIVE untuk admin (is_admin())
-- Realtime enabled untuk `wa_conversations` dan `wa_messages`
+**Tab 1: Admin Users**
+- Tabel daftar admin (dari `user_roles` + email dari auth)
+- Tombol "Invite Admin" -- form email + password untuk signup admin baru
+- Tombol hapus admin (kecuali diri sendiri)
+- Menggunakan edge function baru `manage-admin` untuk create user + assign role secara aman (karena client-side tidak bisa akses `auth.admin`)
 
----
+**Tab 2: WhatsApp / Evolution API**
+- Form input: Evolution API URL, API Key, Webhook Secret
+- Tombol "Test Connection" -- panggil edge function untuk verify koneksi
+- Info webhook URL yang harus di-set di Evolution API dashboard
+- Menggunakan edge function baru `manage-settings` untuk read/write settings secara aman (secrets tidak bisa diakses dari frontend, jadi kita buat tabel `platform_settings` untuk config yang non-secret, dan tetap pakai edge function untuk config secret)
 
-## Fase 2: Edge Function `wa-webhook`
+**Tab 3: AI Configuration**
+- System prompt template (textarea) -- bisa dikustomisasi per client atau global
+- Model selection (dropdown: gemini-2.5-flash-lite, gemini-2.5-flash, dll)
+- Temperature setting (slider 0-1)
+- Max tokens (number input)
+- Disimpan di tabel baru `platform_settings` (key-value store)
 
-Endpoint untuk menerima pesan masuk dari Evolution API. Struktur generic sehingga mudah diadaptasi ke Twilio atau provider lain.
+**Tab 4: Safety & Limits**
+- Default daily message limit untuk client baru
+- Default quota limit untuk client baru
+- Anti-ban delay range (min/max detik)
+- Escalation message template (textarea)
 
-**Alur:**
-1. Terima POST dari Evolution API (verify token via header/query param)
-2. Extract phone number + message body
-3. Lookup client_id dari wa_sessions (based on instance/session yang terhubung)
-4. Lookup/create wa_customers berdasarkan phone number + client_id
-5. Lookup/create wa_conversations yang status 'active' untuk customer ini
-6. Cek `handled_by`:
-   - **'AI'**: Panggil RAG (reuse logic test-rag), simpan pesan USER + pesan AI ke wa_messages, kirim reply via Evolution API (dengan delay 2-4 detik + typing indicator sesuai SOP anti-ban)
-   - **'HUMAN'**: Simpan pesan USER ke wa_messages saja (admin reply dari dashboard)
-7. Jika AI return 'ESKALASI_HUMAN': update handled_by ke 'HUMAN', kirim pesan eskalasi ke user, simpan ke wa_messages
+### 3. Tabel Database Baru: `platform_settings`
 
-**Safety Guardrails (SOP Anti-Ban):**
-- Delay 2-4 detik sebelum reply + typing indicator
-- Hanya inbound (tidak broadcast)
-- Batas harian per client (configurable, default 300)
+```
+platform_settings:
+  - id (uuid PK)
+  - key (text, unique) -- e.g. "ai_model", "default_quota", "escalation_message"
+  - value (text) -- JSON-encoded value
+  - updated_at (timestamptz)
+```
 
-**Secrets yang dibutuhkan:**
-- `EVOLUTION_API_URL` - URL instance Evolution API
-- `EVOLUTION_API_KEY` - API key Evolution API
-- `WA_WEBHOOK_SECRET` - Secret untuk verifikasi webhook
+RLS: admin only. Ini untuk menyimpan config yang bisa diubah dari UI.
 
----
+### 4. Edge Function Baru: `manage-admin`
 
-## Fase 3: Edge Function `wa-send-message`
+Untuk mengelola admin users secara aman:
+- POST: Create user baru via Supabase Admin API + assign role "admin"
+- DELETE: Hapus role admin (tidak hapus user)
+- GET: List semua admin (join user_roles dengan auth.users email)
 
-Fungsi terpisah untuk mengirim pesan WhatsApp via Evolution API. Dipakai oleh:
-- wa-webhook (reply AI + pesan eskalasi)
-- Admin dashboard (reply manual admin)
+Perlu `SUPABASE_SERVICE_ROLE_KEY` karena create user membutuhkan admin access.
 
-**Fitur:**
-- Kirim typing indicator (composing) selama 2-4 detik random
-- Kirim pesan teks
-- Log pesan ke wa_messages
+### 5. Edge Function Baru: `manage-settings`
 
----
-
-## Fase 4: Admin Inbox Dashboard (`/admin/inbox`)
-
-Halaman baru dengan layout split-view:
-
-**Sidebar kiri:**
-- Daftar conversations, dikelompokkan: "Butuh Admin" (HUMAN) di atas, "Ditangani AI" di bawah
-- Badge unread / highlight merah untuk HUMAN conversations
-- Filter by client
-- Realtime update via Supabase channel
-
-**Panel kanan (Chat):**
-- Header: nama customer + phone number + badge handled_by
-- Chat history: bubble berbeda warna per sender (USER = abu, AI = biru, ADMIN = hijau)
-- Input box untuk admin reply (hanya aktif jika handled_by = 'HUMAN')
-- Tombol toggle: "Ambil Alih" (switch ke HUMAN) / "Serahkan ke AI" (switch ke AI)
-- Realtime: subscribe ke wa_messages untuk conversation yang sedang dilihat
-
----
-
-## Fase 5: Update Navigasi + Routing
-
-- Tambah menu "Inbox" di AdminSidebar (icon: MessageSquare)
-- Tambah route `/admin/inbox` di App.tsx
-- Update DeviceManager: tambah info bahwa Evolution API instance perlu dihubungkan
-
----
-
-## Fase 6: Update Knowledge Base UI
-
-- Tambah dropdown `role_tag` saat upload dokumen (opsional, default null = semua role)
-- Tampilkan role_tag di tabel dokumen
+Untuk mengelola settings:
+- GET: Baca semua platform_settings
+- POST: Update/insert platform_settings
+- POST `/test-evolution`: Test koneksi ke Evolution API
 
 ---
 
 ## Detail Teknis
 
 ### File baru:
-- `supabase/functions/wa-webhook/index.ts` - Webhook receiver
-- `supabase/functions/wa-send-message/index.ts` - WhatsApp message sender
-- `src/pages/admin/Inbox.tsx` - Admin live chat page
-- `src/components/admin/InboxSidebar.tsx` - Conversation list sidebar
-- `src/components/admin/InboxChat.tsx` - Chat panel
+- `src/pages/admin/Settings.tsx` -- Halaman settings dengan tabs
+- `supabase/functions/manage-admin/index.ts` -- Edge function admin user management
+- `supabase/functions/manage-settings/index.ts` -- Edge function settings management
+- 1 migration file untuk tabel `platform_settings`
 
 ### File yang dimodifikasi:
-- `src/App.tsx` - Tambah route /admin/inbox
-- `src/components/admin/AdminSidebar.tsx` - Tambah menu Inbox
-- `src/pages/admin/KnowledgeBase.tsx` - Tambah role_tag selector
-- `supabase/config.toml` - Register fungsi baru
-- 1 migration file untuk schema baru
+- `src/pages/admin/Clients.tsx` -- Tambah field quota_limit, quota_remaining, daily_message_limit, status di form
+- `src/components/admin/AdminSidebar.tsx` -- Tambah menu "Settings" (icon: Settings/Cog)
+- `src/App.tsx` -- Tambah route `/admin/settings`
+- `supabase/functions/wa-webhook/index.ts` -- Baca system prompt, model, temperature dari platform_settings (bukan hardcoded)
 
 ### Urutan implementasi:
-1. Migration (schema + RLS + realtime)
-2. wa-send-message edge function
-3. wa-webhook edge function
-4. Admin Inbox UI (sidebar + chat)
-5. Routing + navigasi
-6. Knowledge Base role_tag update
-
-### Catatan penting:
-- **Evolution API** harus di-deploy sendiri di VPS (Docker). URL-nya disimpan sebagai secret.
-- **Webhook URL** dari Edge Function akan di-set di Evolution API dashboard sebagai callback.
-- System prompt RAG diupdate: jika AI tidak bisa jawab, reply "ESKALASI_HUMAN" (bukan fallback message).
-- Batas harian 300 percakapan bisa di-adjust per client di tabel clients (tambah kolom `daily_message_limit`).
+1. Migration tabel `platform_settings`
+2. Edge function `manage-admin` dan `manage-settings`
+3. Update form Client (tambah field)
+4. Buat halaman Settings dengan 4 tab
+5. Update routing + sidebar
+6. Update wa-webhook untuk baca config dari platform_settings
 
