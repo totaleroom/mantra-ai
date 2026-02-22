@@ -96,6 +96,7 @@ export type Database = {
           file_path: string | null
           id: string
           status: string
+          ts_content: unknown
         }
         Insert: {
           chunk_index?: number | null
@@ -107,6 +108,7 @@ export type Database = {
           file_path?: string | null
           id?: string
           status?: string
+          ts_content?: unknown
         }
         Update: {
           chunk_index?: number | null
@@ -118,6 +120,7 @@ export type Database = {
           file_path?: string | null
           id?: string
           status?: string
+          ts_content?: unknown
         }
         Relationships: [
           {
@@ -233,6 +236,16 @@ export type Database = {
         Returns: boolean
       }
       is_admin: { Args: never; Returns: boolean }
+      search_documents: {
+        Args: { p_client_id: string; p_limit?: number; p_query: string }
+        Returns: {
+          chunk_index: number
+          content: string
+          file_name: string
+          id: string
+          rank: number
+        }[]
+      }
     }
     Enums: {
       app_role: "admin"
