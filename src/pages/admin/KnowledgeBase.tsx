@@ -68,12 +68,22 @@ export default function KnowledgeBase() {
         toast({ variant: "destructive", title: "Upload gagal", description: uploadError.message });
         continue;
       }
-      await supabase.from("documents" as any).insert({
+      const { data: docData } = await (supabase.from("documents" as any).insert({
         client_id: selectedClientId,
         file_name: file.name,
         file_path: path,
         status: "processing",
-      } as any);
+      } as any) as any).select("id").single();
+      
+      // Trigger process-document edge function
+      if (docData?.id) {
+        supabase.functions.invoke("process-document", {
+          body: { document_id: docData.id },
+        }).then(({ error: procErr }: any) => {
+          if (procErr) console.error("Process document error:", procErr);
+          fetchDocuments();
+        });
+      }
       toast({ title: `${file.name} diupload, sedang diproses...` });
     }
     setUploading(false);
