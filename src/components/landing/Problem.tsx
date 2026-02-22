@@ -1,25 +1,25 @@
-import { MessageSquare, Package, ClipboardList, Clock } from "lucide-react";
+import { Frown, BookX, Clock, GraduationCap } from "lucide-react";
 
 const problems = [
   {
-    icon: MessageSquare,
-    old: "Chat menumpuk, banyak yang tidak terbalas",
-    new: "Chat otomatis terjawab 24/7 dalam hitungan detik",
+    icon: Frown,
+    old: "Mood karyawan berubah-ubah, kadang ketus ke pelanggan",
+    new: "Selalu ramah & sabar, bahkan saat pelanggan marah",
   },
   {
-    icon: Package,
-    old: "Stok sering salah, data tersebar di banyak tempat",
-    new: "Stok terpusat & auto-sync antar platform",
-  },
-  {
-    icon: ClipboardList,
-    old: "Catat pesanan manual, sering typo & telat",
-    new: "Pesanan otomatis tercatat, akurat, real-time",
+    icon: BookX,
+    old: "Sering lupa SOP, jawaban tidak konsisten",
+    new: "100% patuh SOP, jawaban selalu sesuai arahan owner",
   },
   {
     icon: Clock,
-    old: "Habis waktu untuk operasional, tak sempat mikir strategi",
-    new: "Waktu luang untuk kembangkan bisnis & keluarga",
+    old: "Hanya bisa kerja 8 jam, libur di hari besar",
+    new: "Online 24/7, tidak kenal libur atau jam istirahat",
+  },
+  {
+    icon: GraduationCap,
+    old: "Butuh training berulang setiap ada produk/promo baru",
+    new: "Update knowledge base sekali, langsung paham semua",
   },
 ];
 
@@ -32,20 +32,20 @@ const Problem = () => {
             Masalah
           </span>
           <h2 className="mb-4 text-3xl font-extrabold tracking-tight text-foreground md:text-4xl">
-            Chatbot Biasa Cuma Bisa Balas.{" "}
-            <span className="text-primary">MANTRA Bisa Bertindak.</span>
+            CS Manusia Punya Batas.{" "}
+            <span className="text-primary">MANTRA Tidak.</span>
           </h2>
           <p className="text-muted-foreground">
-            Jangan sampai bisnis Anda kehilangan pelanggan karena CS yang lambat, kaku, dan tidak bisa closing.
+            Karyawan bisa capek, bad mood, lupa SOP. MANTRA selalu ramah, patuh, dan tahu cara menangani pelanggan yang marah sekalipun.
           </p>
         </div>
 
         <div className="grid gap-4 md:grid-cols-2">
-          {/* Cara Lama */}
+          {/* CS Manusia */}
           <div className="space-y-3">
             <h3 className="mb-4 flex items-center gap-2 font-mono text-sm font-bold uppercase tracking-wider text-destructive">
               <span className="h-2 w-2 rounded-full bg-destructive" />
-              Cara Lama
+              CS Manusia
             </h3>
             {problems.map((p, i) => (
               <div key={i} className="flex items-start gap-3 rounded-xl border border-destructive/10 bg-destructive/5 p-4">

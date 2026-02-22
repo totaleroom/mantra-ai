@@ -1,4 +1,4 @@
-import { Shield, Brain, Megaphone, MessageCircle, Database, Sparkles } from "lucide-react";
+import { Shield, Brain, Database, Sparkles } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 
 const features = [
@@ -8,10 +8,10 @@ const features = [
     icon: Shield,
     color: "text-primary",
     bg: "bg-primary/10",
-    description: "Balas chat pelanggan otomatis 24/7 di WhatsApp, Instagram, dan marketplace.",
+    description: "Balas chat pelanggan otomatis 24/7 di WhatsApp dan Instagram.",
     bullets: [
       "Auto-reply cerdas sesuai konteks",
-      "Multi-platform: WA, IG, Shopee, Tokopedia",
+      "Multi-platform: WhatsApp & Instagram",
       "Handover ke manusia jika perlu",
       "Bahasa natural, bukan robot kaku",
     ],
@@ -26,22 +26,8 @@ const features = [
     bullets: [
       "Dashboard stok real-time",
       "CRM pelanggan terintegrasi",
-      "Auto-sync marketplace & toko fisik",
+      "Auto-sync antar platform",
       "Laporan otomatis harian/mingguan",
-    ],
-  },
-  {
-    name: "SUARA",
-    title: "Content Creator",
-    icon: Megaphone,
-    color: "text-foreground",
-    bg: "bg-secondary",
-    description: "Buat konten marketing dan caption produk otomatis, siap posting.",
-    bullets: [
-      "Caption Instagram & TikTok",
-      "Deskripsi produk marketplace",
-      "Script video pendek",
-      "Disesuaikan tone brand Anda",
     ],
   },
 ];
@@ -63,7 +49,7 @@ const Features = () => {
           </p>
         </div>
 
-        <div className="grid gap-6 md:grid-cols-3">
+        <div className="mx-auto grid max-w-3xl gap-6 md:grid-cols-2">
           {features.map((f) => (
             <Card key={f.name} className="group overflow-hidden transition-shadow hover:shadow-lg">
               <CardContent className="p-6">
