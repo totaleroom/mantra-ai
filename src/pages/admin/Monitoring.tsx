@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -8,55 +8,23 @@ import {
 } from "@/components/ui/select";
 import { MessageSquare, Users, AlertTriangle, Bell, Check } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-
-interface Client { id: string; name: string; quota_remaining: number; }
-interface MessageLog { client_id: string; message_count: number; token_usage: number; log_date: string; }
-interface Alert { id: string; client_id: string; alert_type: string; message: string; is_read: boolean; created_at: string; }
+import { useQueryClient } from "@tanstack/react-query";
+import { useClientsList, useMessageLogs, useBillingAlerts } from "@/hooks/useAdminData";
 
 export default function Monitoring() {
-  const [clients, setClients] = useState<Client[]>([]);
-  const [logs, setLogs] = useState<MessageLog[]>([]);
-  const [alerts, setAlerts] = useState<Alert[]>([]);
   const [dateRange, setDateRange] = useState("7");
   const [filterClient, setFilterClient] = useState("all");
+  const queryClient = useQueryClient();
 
-  useEffect(() => {
-    supabase.from("clients" as any).select("id, name, quota_remaining").order("name").then(({ data }) => {
-      setClients((data as any[] || []) as Client[]);
-    });
-    fetchAlerts();
-  }, []);
-
-  useEffect(() => { fetchLogs(); }, [dateRange, filterClient]);
-
-  const fetchLogs = async () => {
-    const since = new Date();
-    since.setDate(since.getDate() - parseInt(dateRange));
-    let query = supabase
-      .from("message_logs" as any)
-      .select("*")
-      .gte("log_date", since.toISOString().split("T")[0])
-      .order("log_date", { ascending: true });
-    if (filterClient !== "all") query = query.eq("client_id", filterClient);
-    const { data } = await query;
-    setLogs((data as any[] || []) as MessageLog[]);
-  };
-
-  const fetchAlerts = async () => {
-    const { data } = await supabase
-      .from("billing_alerts" as any)
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(50);
-    setAlerts((data as any[] || []) as Alert[]);
-  };
+  const { data: clients = [] } = useClientsList();
+  const { data: logs = [] } = useMessageLogs(dateRange, filterClient);
+  const { data: alerts = [] } = useBillingAlerts();
 
   const markRead = async (id: string) => {
     await supabase.from("billing_alerts" as any).update({ is_read: true } as any).eq("id", id);
-    fetchAlerts();
+    queryClient.invalidateQueries({ queryKey: ["billingAlerts"] });
   };
 
-  // Aggregate logs by date for chart
   const chartData = logs.reduce<Record<string, { date: string; messages: number; tokens: number }>>((acc, log) => {
     const key = log.log_date;
     if (!acc[key]) acc[key] = { date: key, messages: 0, tokens: 0 };
@@ -70,8 +38,11 @@ export default function Monitoring() {
     .reduce((sum, l) => sum + l.message_count, 0);
 
   const unreadAlerts = alerts.filter((a) => !a.is_read).length;
-  const lowestQuotaClient = clients.length
-    ? clients.reduce((min, c) => (c.quota_remaining < min.quota_remaining ? c : min), clients[0])
+
+  // For lowest quota, we need full client data
+  const clientsWithQuota = clients as any[];
+  const lowestQuotaClient = clientsWithQuota.length
+    ? clientsWithQuota.reduce((min: any, c: any) => ((c.quota_remaining ?? Infinity) < (min.quota_remaining ?? Infinity) ? c : min), clientsWithQuota[0])
     : null;
 
   const clientNameMap = new Map(clients.map((c) => [c.id, c.name]));

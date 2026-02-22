@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,8 +16,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Upload, FileText, Trash2, Loader2, Send, Tag } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useQueryClient } from "@tanstack/react-query";
+import { useClientsList, useDocuments } from "@/hooks/useAdminData";
 
-interface Client { id: string; name: string; }
 interface Document {
   id: string;
   file_name: string;
@@ -36,11 +37,8 @@ const roleTagColors: Record<string, string> = {
 };
 
 export default function KnowledgeBase() {
-  const [clients, setClients] = useState<Client[]>([]);
   const [filterClientId, setFilterClientId] = useState("all");
   const [uploadClientId, setUploadClientId] = useState("");
-  const [documents, setDocuments] = useState<Document[]>([]);
-  const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [chatInput, setChatInput] = useState("");
   const [chatResponse, setChatResponse] = useState("");
@@ -48,36 +46,12 @@ export default function KnowledgeBase() {
   const [dragOver, setDragOver] = useState(false);
   const [uploadRoleTag, setUploadRoleTag] = useState<string>("");
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
-  useEffect(() => {
-    supabase.from("clients" as any).select("id, name").order("name").then(({ data }) => {
-      setClients((data as any[] || []) as Client[]);
-    });
-  }, []);
+  const { data: clients = [] } = useClientsList();
+  const { data: documents = [], isLoading: loading } = useDocuments(filterClientId, clients);
 
-  const fetchDocuments = async () => {
-    setLoading(true);
-    let query = supabase
-      .from("documents" as any)
-      .select("id, file_name, status, created_at, chunk_index, role_tag, client_id")
-      .eq("chunk_index", 0)
-      .order("created_at", { ascending: false });
-
-    if (filterClientId !== "all") {
-      query = query.eq("client_id", filterClientId);
-    }
-
-    const { data } = await query;
-    const clientMap = new Map(clients.map((c) => [c.id, c.name]));
-    const docs = ((data as any[]) || []).map((d: any) => ({
-      ...d,
-      client_name: clientMap.get(d.client_id) || "Unknown",
-    }));
-    setDocuments(docs as Document[]);
-    setLoading(false);
-  };
-
-  useEffect(() => { fetchDocuments(); }, [filterClientId, clients]);
+  const invalidateDocs = () => queryClient.invalidateQueries({ queryKey: ["documents"] });
 
   const handleUpload = async (files: FileList | null) => {
     if (!files || !uploadClientId) {
@@ -98,10 +72,7 @@ export default function KnowledgeBase() {
         continue;
       }
       const insertData: any = {
-        client_id: uploadClientId,
-        file_name: file.name,
-        file_path: path,
-        status: "processing",
+        client_id: uploadClientId, file_name: file.name, file_path: path, status: "processing",
       };
       if (uploadRoleTag) insertData.role_tag = uploadRoleTag;
       const { data: docData } = await (supabase.from("documents" as any).insert(insertData) as any).select("id").single();
@@ -109,27 +80,24 @@ export default function KnowledgeBase() {
       if (docData?.id) {
         supabase.functions.invoke("process-document", {
           body: { document_id: docData.id },
-        }).then(({ error: procErr }: any) => {
-          if (procErr) console.error("Process document error:", procErr);
-          fetchDocuments();
-        });
+        }).then(() => invalidateDocs());
       }
       toast({ title: `${file.name} diupload, sedang diproses...` });
     }
     setUploading(false);
-    fetchDocuments();
+    invalidateDocs();
   };
 
   const handleDelete = async (doc: Document) => {
     await supabase.from("documents" as any).delete().eq("id", doc.id);
     toast({ title: "Dokumen dihapus" });
-    fetchDocuments();
+    invalidateDocs();
   };
 
   const handleUpdateRoleTag = async (doc: Document, newTag: string | null) => {
     await supabase.from("documents" as any).update({ role_tag: newTag } as any).eq("id", doc.id);
     toast({ title: "Role tag diperbarui" });
-    fetchDocuments();
+    invalidateDocs();
   };
 
   const handleTestChat = async () => {
@@ -229,9 +197,8 @@ export default function KnowledgeBase() {
         <p className="text-center text-sm text-muted-foreground py-8">Belum ada dokumen</p>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {documents.map((doc) => (
+          {(documents as Document[]).map((doc) => (
             <div key={doc.id} className="relative rounded-lg border border-border bg-card p-4 hover:bg-muted/30 transition-colors">
-              {/* Delete */}
               <div className="absolute top-2 right-2">
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
@@ -251,17 +218,11 @@ export default function KnowledgeBase() {
                   </AlertDialogContent>
                 </AlertDialog>
               </div>
-
-              {/* Client badge */}
               <Badge variant="secondary" className="text-[10px] mb-2">{doc.client_name}</Badge>
-
-              {/* File name */}
               <div className="flex items-center gap-2 mb-2">
                 <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                 <span className="text-sm font-medium text-foreground truncate">{doc.file_name}</span>
               </div>
-
-              {/* Role tag (inline editable) */}
               <div className="flex items-center gap-2 mb-2">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -284,8 +245,6 @@ export default function KnowledgeBase() {
                 </DropdownMenu>
                 {statusBadge(doc.status)}
               </div>
-
-              {/* Date */}
               <p className="text-[10px] text-muted-foreground">
                 {new Date(doc.created_at).toLocaleDateString("id-ID")}
               </p>
