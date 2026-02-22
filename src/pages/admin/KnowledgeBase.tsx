@@ -18,7 +18,7 @@ import { Upload, FileText, Trash2, Loader2, Send } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface Client { id: string; name: string; }
-interface Document { id: string; file_name: string; status: string; created_at: string; chunk_index: number; }
+interface Document { id: string; file_name: string; status: string; created_at: string; chunk_index: number; role_tag: string | null; }
 
 export default function KnowledgeBase() {
   const [clients, setClients] = useState<Client[]>([]);
@@ -30,6 +30,7 @@ export default function KnowledgeBase() {
   const [chatResponse, setChatResponse] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [uploadRoleTag, setUploadRoleTag] = useState<string>("");
   const { toast } = useToast();
 
   useEffect(() => {
@@ -43,7 +44,7 @@ export default function KnowledgeBase() {
     setLoading(true);
     const { data } = await supabase
       .from("documents" as any)
-      .select("id, file_name, status, created_at, chunk_index")
+      .select("id, file_name, status, created_at, chunk_index, role_tag")
       .eq("client_id", selectedClientId)
       .eq("chunk_index", 0)
       .order("created_at", { ascending: false });
@@ -68,12 +69,14 @@ export default function KnowledgeBase() {
         toast({ variant: "destructive", title: "Upload gagal", description: uploadError.message });
         continue;
       }
-      const { data: docData } = await (supabase.from("documents" as any).insert({
+      const insertData: any = {
         client_id: selectedClientId,
         file_name: file.name,
         file_path: path,
         status: "processing",
-      } as any) as any).select("id").single();
+      };
+      if (uploadRoleTag) insertData.role_tag = uploadRoleTag;
+      const { data: docData } = await (supabase.from("documents" as any).insert(insertData) as any).select("id").single();
       
       // Trigger process-document edge function
       if (docData?.id) {
@@ -149,6 +152,19 @@ export default function KnowledgeBase() {
           >
             <Upload className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
             <p className="mb-2 text-sm text-muted-foreground">Drag & drop PDF/TXT di sini</p>
+            <div className="mb-3 flex justify-center">
+              <Select value={uploadRoleTag} onValueChange={setUploadRoleTag}>
+                <SelectTrigger className="w-48 h-8 text-xs">
+                  <SelectValue placeholder="Role Tag (opsional)" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">Semua Role</SelectItem>
+                  <SelectItem value="admin">Admin</SelectItem>
+                  <SelectItem value="warehouse">Warehouse</SelectItem>
+                  <SelectItem value="owner">Owner</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <label className="cursor-pointer">
               <Button variant="outline" size="sm" disabled={uploading} asChild>
                 <span>
@@ -168,22 +184,30 @@ export default function KnowledgeBase() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>File</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Tanggal</TableHead>
+                     <TableHead>File</TableHead>
+                     <TableHead>Role</TableHead>
+                     <TableHead>Status</TableHead>
+                     <TableHead>Tanggal</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {documents.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={4} className="text-center text-muted-foreground py-8">Belum ada dokumen</TableCell>
+                      <TableCell colSpan={5} className="text-center text-muted-foreground py-8">Belum ada dokumen</TableCell>
                     </TableRow>
                   ) : (
                     documents.map((doc) => (
                       <TableRow key={doc.id}>
                         <TableCell className="flex items-center gap-2">
                           <FileText className="h-4 w-4 text-muted-foreground" /> {doc.file_name}
+                        </TableCell>
+                        <TableCell>
+                          {doc.role_tag ? (
+                            <Badge variant="outline" className="text-xs">{doc.role_tag}</Badge>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
                         </TableCell>
                         <TableCell>{statusBadge(doc.status)}</TableCell>
                         <TableCell className="text-sm text-muted-foreground">

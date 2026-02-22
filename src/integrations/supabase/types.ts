@@ -52,6 +52,7 @@ export type Database = {
       clients: {
         Row: {
           created_at: string
+          daily_message_limit: number
           id: string
           industry: string | null
           name: string
@@ -63,6 +64,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          daily_message_limit?: number
           id?: string
           industry?: string | null
           name: string
@@ -74,6 +76,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          daily_message_limit?: number
           id?: string
           industry?: string | null
           name?: string
@@ -95,6 +98,7 @@ export type Database = {
           file_name: string
           file_path: string | null
           id: string
+          role_tag: string | null
           status: string
           ts_content: unknown
         }
@@ -107,6 +111,7 @@ export type Database = {
           file_name: string
           file_path?: string | null
           id?: string
+          role_tag?: string | null
           status?: string
           ts_content?: unknown
         }
@@ -119,6 +124,7 @@ export type Database = {
           file_name?: string
           file_path?: string | null
           id?: string
+          role_tag?: string | null
           status?: string
           ts_content?: unknown
         }
@@ -187,6 +193,115 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      wa_conversations: {
+        Row: {
+          client_id: string
+          created_at: string
+          customer_id: string
+          handled_by: string
+          id: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          client_id: string
+          created_at?: string
+          customer_id: string
+          handled_by?: string
+          id?: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          client_id?: string
+          created_at?: string
+          customer_id?: string
+          handled_by?: string
+          id?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wa_conversations_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "wa_conversations_customer_id_fkey"
+            columns: ["customer_id"]
+            isOneToOne: false
+            referencedRelation: "wa_customers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      wa_customers: {
+        Row: {
+          client_id: string
+          created_at: string
+          id: string
+          name: string | null
+          phone_number: string
+        }
+        Insert: {
+          client_id: string
+          created_at?: string
+          id?: string
+          name?: string | null
+          phone_number: string
+        }
+        Update: {
+          client_id?: string
+          created_at?: string
+          id?: string
+          name?: string | null
+          phone_number?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wa_customers_client_id_fkey"
+            columns: ["client_id"]
+            isOneToOne: false
+            referencedRelation: "clients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      wa_messages: {
+        Row: {
+          content: string
+          conversation_id: string
+          created_at: string
+          id: string
+          sender: string
+        }
+        Insert: {
+          content: string
+          conversation_id: string
+          created_at?: string
+          id?: string
+          sender: string
+        }
+        Update: {
+          content?: string
+          conversation_id?: string
+          created_at?: string
+          id?: string
+          sender?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wa_messages_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "wa_conversations"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       wa_sessions: {
         Row: {

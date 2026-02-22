@@ -12,6 +12,7 @@ import Clients from "./pages/admin/Clients";
 import DeviceManager from "./pages/admin/DeviceManager";
 import KnowledgeBase from "./pages/admin/KnowledgeBase";
 import Monitoring from "./pages/admin/Monitoring";
+import Inbox from "./pages/admin/Inbox";
 
 const queryClient = new QueryClient();
 
@@ -37,6 +38,7 @@ const App = () => (
             <Route path="devices" element={<DeviceManager />} />
             <Route path="knowledge" element={<KnowledgeBase />} />
             <Route path="monitoring" element={<Monitoring />} />
+            <Route path="inbox" element={<Inbox />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>
