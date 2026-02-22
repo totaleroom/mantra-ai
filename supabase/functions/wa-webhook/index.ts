@@ -45,7 +45,6 @@ function detectSector(message: string): string | null {
 function buildChatMessages(history: { sender: string; content: string; media_url?: string | null }[]): any[] {
   return history.map((msg) => {
     if (msg.sender === "USER") {
-      // If message has media, build multimodal content
       if (msg.media_url) {
         const parts: any[] = [
           { type: "image_url", image_url: { url: msg.media_url } },
@@ -65,6 +64,39 @@ function buildChatMessages(history: { sender: string; content: string; media_url
     }
     return { role: "user", content: msg.content };
   });
+}
+
+/**
+ * Trim chat history by character limit to prevent context length exceeded errors.
+ * Removes oldest messages first, always keeps the last message.
+ */
+function trimHistoryByCharLimit(messages: any[], maxChars: number = 3000): any[] {
+  if (messages.length === 0) return messages;
+
+  const getTextLength = (content: any): number => {
+    if (typeof content === "string") return content.length;
+    if (Array.isArray(content)) {
+      return content
+        .filter((p: any) => p.type === "text")
+        .reduce((sum: number, p: any) => sum + (p.text?.length || 0), 0);
+    }
+    return 0;
+  };
+
+  let totalChars = messages.reduce((sum: number, m: any) => sum + getTextLength(m.content), 0);
+
+  if (totalChars <= maxChars) return messages;
+
+  const trimmed = [...messages];
+  const originalCount = trimmed.length;
+
+  while (totalChars > maxChars && trimmed.length > 1) {
+    const removed = trimmed.shift()!;
+    totalChars -= getTextLength(removed.content);
+  }
+
+  console.warn(`Chat history trimmed from ${originalCount} to ${trimmed.length} messages (${totalChars} chars)`);
+  return trimmed;
 }
 
 /**
@@ -369,6 +401,7 @@ serve(async (req) => {
       .limit(10);
 
     const historyMessages = buildChatMessages(chatHistory || []);
+    const trimmedMessages = trimHistoryByCharLimit(historyMessages, 3000);
 
     // Sector-based RAG search
     const searchText = effectiveText || "";
@@ -450,7 +483,7 @@ serve(async (req) => {
           model: aiModel,
           messages: [
             { role: "system", content: systemPrompt },
-            ...historyMessages,
+            ...trimmedMessages,
           ],
           temperature: aiTemperature,
           max_tokens: aiMaxTokens,
