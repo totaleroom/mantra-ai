@@ -63,7 +63,7 @@ const AdminCostCalculator = () => {
               <span className="text-sm font-medium text-foreground">Jumlah Admin</span>
               <span className="font-mono text-lg font-bold text-primary">{adminCount[0]} orang</span>
             </div>
-            <Slider value={adminCount} onValueChange={setAdminCount} min={1} max={10} step={1} />
+            <Slider value={adminCount} onValueChange={setAdminCount} min={1} max={10} step={1} aria-label="Jumlah admin" />
           </div>
 
           {/* Comparison Cards */}

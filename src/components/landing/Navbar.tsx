@@ -19,7 +19,7 @@ const Navbar = () => {
       <div className="container mx-auto flex h-16 items-center justify-between px-4">
         {/* Logo */}
         <a href="#" className="flex items-center">
-          <img src={logoHorizontal} alt="Mantra AI" className="h-8 object-contain" width={120} height={32} />
+          <img src={logoHorizontal} alt="Mantra AI" className="h-8 object-contain" width={120} height={32} fetchPriority="high" />
         </a>
 
         {/* Desktop Nav */}
@@ -48,7 +48,7 @@ const Navbar = () => {
         </div>
 
         {/* Mobile Toggle */}
-        <button className="md:hidden" onClick={() => setMobileOpen(!mobileOpen)}>
+        <button className="md:hidden" onClick={() => setMobileOpen(!mobileOpen)} aria-label="Buka menu navigasi">
           {mobileOpen ? <X size={24} /> : <Menu size={24} />}
         </button>
       </div>

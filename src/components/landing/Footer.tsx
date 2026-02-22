@@ -33,7 +33,7 @@ const Footer = () => {
 
           {/* Navigation */}
           <div>
-            <h4 className="mb-3 text-sm font-semibold text-foreground">Navigasi</h4>
+            <p className="mb-3 text-sm font-semibold text-foreground">Navigasi</p>
             <div className="flex flex-col gap-2">
               <a href="#masalah" className="text-sm text-muted-foreground hover:text-foreground">Masalah</a>
               <a href="#solusi" className="text-sm text-muted-foreground hover:text-foreground">Solusi</a>
@@ -44,7 +44,7 @@ const Footer = () => {
 
           {/* Contact */}
           <div>
-            <h4 className="mb-3 text-sm font-semibold text-foreground">Kontak</h4>
+            <p className="mb-3 text-sm font-semibold text-foreground">Kontak</p>
             <div className="flex flex-col gap-2">
               <a
                 href="mailto:hello00mantra@gmail.com"
