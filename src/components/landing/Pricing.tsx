@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { Check, X, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -6,7 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 const plans = [
   {
     name: "STARTER",
-    price: { monthly: 250_000, yearly: 200_000 },
+    price: 250_000,
     setup: 2_000_000,
     target: "Cocok untuk usaha baru mulai go-digital",
     popular: false,
@@ -16,40 +15,22 @@ const plans = [
       { text: "Dashboard stok sederhana", included: true },
       { text: "Laporan mingguan", included: true },
       { text: "Multi-platform sync", included: false },
-      { text: "Content creator (SUARA)", included: false },
       { text: "Priority support", included: false },
     ],
   },
   {
     name: "GROWTH",
-    price: { monthly: 350_000, yearly: 280_000 },
+    price: 350_000,
     setup: 3_000_000,
     target: "Paling cocok untuk UMKM yang ingin scale up",
     popular: true,
     features: [
-      { text: "3 channel (WA, IG, Marketplace)", included: true },
+      { text: "Multi-channel (WA & Instagram)", included: true },
       { text: "Auto-reply cerdas + konteks", included: true },
       { text: "CRM & stok multi-platform", included: true },
       { text: "Laporan harian otomatis", included: true },
       { text: "Multi-platform sync", included: true },
-      { text: "Content creator (SUARA)", included: true },
-      { text: "Priority support", included: false },
-    ],
-  },
-  {
-    name: "ENTERPRISE",
-    price: { monthly: 0, yearly: 0 },
-    setup: 0,
-    target: "Untuk bisnis besar dengan kebutuhan custom",
-    popular: false,
-    features: [
-      { text: "Unlimited channel", included: true },
-      { text: "Custom AI training", included: true },
-      { text: "Full ERP integration", included: true },
-      { text: "Custom reporting", included: true },
-      { text: "Multi-platform sync", included: true },
-      { text: "Content creator (SUARA)", included: true },
-      { text: "Dedicated account manager", included: true },
+      { text: "Priority support", included: true },
     ],
   },
 ];
@@ -58,12 +39,10 @@ const formatRp = (n: number) =>
   new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(n);
 
 const Pricing = () => {
-  const [yearly, setYearly] = useState(false);
-
   return (
     <section id="harga" className="py-16 md:py-24">
       <div className="container mx-auto px-4">
-        <div className="mx-auto mb-8 max-w-2xl text-center">
+        <div className="mx-auto mb-10 max-w-2xl text-center">
           <span className="mb-3 inline-block font-mono text-xs font-semibold uppercase tracking-widest text-primary">
             Harga
           </span>
@@ -72,22 +51,7 @@ const Pricing = () => {
           </h2>
         </div>
 
-        {/* Toggle */}
-        <div className="mb-10 flex items-center justify-center gap-3">
-          <span className={`text-sm font-medium ${!yearly ? "text-foreground" : "text-muted-foreground"}`}>Bulanan</span>
-          <button
-            onClick={() => setYearly(!yearly)}
-            aria-label="Toggle harga tahunan"
-            className={`relative h-7 w-12 rounded-full transition-colors ${yearly ? "bg-primary" : "bg-border"}`}
-          >
-            <span className={`absolute top-0.5 h-6 w-6 rounded-full bg-card shadow transition-transform ${yearly ? "translate-x-5" : "translate-x-0.5"}`} />
-          </button>
-          <span className={`text-sm font-medium ${yearly ? "text-foreground" : "text-muted-foreground"}`}>
-            Tahunan <span className="text-xs text-primary">(-20%)</span>
-          </span>
-        </div>
-
-        <div className="grid gap-6 md:grid-cols-3">
+        <div className="mx-auto grid max-w-3xl gap-6 md:grid-cols-2">
           {plans.map((plan) => (
             <Card
               key={plan.name}
@@ -105,22 +69,13 @@ const Pricing = () => {
                   {plan.name}
                 </h3>
 
-                {plan.price.monthly > 0 ? (
-                  <>
-                    <div className="mt-3 flex items-baseline gap-1">
-                      <span className="font-mono text-4xl font-extrabold text-foreground">
-                        {formatRp(yearly ? plan.price.yearly : plan.price.monthly)}
-                      </span>
-                      <span className="text-sm text-muted-foreground">/bulan</span>
-                    </div>
-                    <p className="mt-1 text-xs text-muted-foreground">+ Setup {formatRp(plan.setup)} (sekali bayar)</p>
-                  </>
-                ) : (
-                  <div className="mt-3">
-                    <span className="font-mono text-4xl font-extrabold text-foreground">Custom</span>
-                    <p className="mt-1 text-xs text-muted-foreground">Hubungi kami untuk penawaran</p>
-                  </div>
-                )}
+                <div className="mt-3 flex items-baseline gap-1">
+                  <span className="font-mono text-4xl font-extrabold text-foreground">
+                    {formatRp(plan.price)}
+                  </span>
+                  <span className="text-sm text-muted-foreground">/bulan</span>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">+ Setup {formatRp(plan.setup)} (sekali bayar)</p>
 
                 <p className="mt-4 rounded-lg bg-secondary px-3 py-2 text-xs font-medium text-muted-foreground">
                   {plan.target}
@@ -147,7 +102,7 @@ const Pricing = () => {
                   asChild
                 >
                   <a href="https://wa.me/6282125086328" target="_blank" rel="noopener noreferrer">
-                    {plan.price.monthly > 0 ? "Mulai Sekarang" : "Hubungi Kami"}
+                    Mulai Sekarang
                     <ArrowRight size={16} />
                   </a>
                 </Button>
