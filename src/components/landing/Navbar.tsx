@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Menu, X } from "lucide-react";
+import logoHorizontal from "@/assets/logo_mantra_horizontal.png";
 
 const navLinks = [
   { label: "Masalah", href: "#masalah" },
@@ -17,11 +18,8 @@ const Navbar = () => {
     <nav className="sticky top-0 z-50 border-b border-border/50 bg-background/80 backdrop-blur-lg">
       <div className="container mx-auto flex h-16 items-center justify-between px-4">
         {/* Logo */}
-        <a href="#" className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary font-bold text-primary-foreground">
-            M
-          </div>
-          <span className="text-xl font-extrabold tracking-tight text-foreground">MANTRA</span>
+        <a href="#" className="flex items-center">
+          <img src={logoHorizontal} alt="Mantra AI" className="h-8" />
         </a>
 
         {/* Desktop Nav */}
