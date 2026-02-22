@@ -68,7 +68,7 @@ const Login = () => {
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm">
         <div className="text-center">
-          <img src={logoCircle} alt="Mantra AI" className="mx-auto mb-6 h-16 w-16" width={64} height={64} />
+          <img src={logoCircle} alt="Mantra AI" className="mx-auto mb-6 h-16 w-16 object-contain" width={64} height={64} />
           <h1 className="mb-2 text-2xl font-extrabold text-foreground">
             {mode === "login" ? "Masuk ke MANTRA" : "Daftar Akun MANTRA"}
           </h1>

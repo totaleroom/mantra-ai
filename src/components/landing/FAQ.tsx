@@ -114,7 +114,7 @@ const FAQ = () => {
           <div className="mt-8 text-center">
             <p className="mb-3 text-sm text-muted-foreground">Masih ada pertanyaan?</p>
             <a
-              href="https://wa.me/6281234567890"
+              href="https://wa.me/6282125086328"
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2 text-sm font-semibold text-primary hover:underline"

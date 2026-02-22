@@ -1,73 +1,231 @@
-# Welcome to your Lovable project
+# MANTRA AI — Asisten Digital untuk UMKM Indonesia
 
-## Project info
+> Platform asisten digital berbasis AI yang membantu UMKM Indonesia mengotomasi customer service WhatsApp, manajemen stok, dan marketing — sehingga pemilik bisnis bisa fokus mengembangkan usaha.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+---
 
-## How can I edit this code?
+## 🏗️ Arsitektur
 
-There are several ways of editing your application.
-
-**Use Lovable**
-
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
-
-Changes made via Lovable will be committed automatically to this repo.
-
-**Use your preferred IDE**
-
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
-
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
-
-Follow these steps:
-
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
-
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
-
-# Step 3: Install the necessary dependencies.
-npm i
-
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
+```
+┌─────────────────────┐
+│   Frontend (SPA)    │  React + Vite + TypeScript + Tailwind CSS
+│   Static Build      │  → dist/ folder
+└────────┬────────────┘
+         │ HTTPS
+┌────────▼────────────┐
+│   Lovable Cloud     │  Authentication, Database, Edge Functions
+│   (Backend)         │  Real-time subscriptions, File storage
+└─────────────────────┘
 ```
 
-**Edit a file directly in GitHub**
+- **Frontend**: React 18 SPA dengan Vite, Tailwind CSS, shadcn/ui
+- **Backend**: Lovable Cloud (authentication, PostgreSQL database, edge functions)
+- **State Management**: TanStack React Query
+- **Routing**: React Router v6
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+---
 
-**Use GitHub Codespaces**
+## 📁 Struktur Folder
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+```
+├── public/                 # Static assets (favicon, robots.txt, sitemap.xml)
+├── src/
+│   ├── assets/             # Gambar & media (imported via ES6)
+│   ├── components/
+│   │   ├── admin/          # Komponen dashboard admin
+│   │   ├── landing/        # Komponen landing page
+│   │   └── ui/             # shadcn/ui components
+│   ├── hooks/              # Custom React hooks
+│   ├── integrations/       # Backend client & types (auto-generated)
+│   ├── lib/                # Utility functions
+│   ├── pages/              # Route pages
+│   │   └── admin/          # Halaman dashboard admin
+│   └── test/               # Test setup & files
+├── supabase/
+│   ├── config.toml         # Backend configuration (auto-managed)
+│   ├── functions/          # Edge functions (auto-deployed)
+│   └── migrations/         # Database migrations
+├── index.html              # Entry point + SEO meta tags
+├── tailwind.config.ts      # Tailwind configuration
+└── vite.config.ts          # Vite build configuration
+```
 
-## What technologies are used for this project?
+---
 
-This project is built with:
+## 🚀 Development Lokal
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+### Prasyarat
 
-## How can I deploy this project?
+- Node.js >= 18 (disarankan menggunakan [nvm](https://github.com/nvm-sh/nvm))
+- npm atau bun
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+### Langkah-langkah
 
-## Can I connect a custom domain to my Lovable project?
+```bash
+# 1. Clone repository
+git clone <YOUR_GIT_URL>
+cd mantra-admin-id
 
-Yes, you can!
+# 2. Install dependencies
+npm install
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+# 3. Setup environment variables
+# File .env sudah otomatis ter-generate oleh Lovable Cloud
+# Jika development lokal, buat file .env dengan:
+cp .env.example .env
+# Isi variabel yang diperlukan (lihat bagian Environment Variables)
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+# 4. Jalankan development server
+npm run dev
+
+# 5. Build untuk production
+npm run build
+
+# 6. Preview production build
+npm run preview
+```
+
+---
+
+## 🌐 Deployment ke VPS
+
+### Prasyarat VPS
+
+- Ubuntu 20.04+ / Debian 11+
+- Nginx
+- Node.js >= 18
+- SSL certificate (Let's Encrypt / Certbot)
+
+### Langkah 1: Build Aplikasi
+
+```bash
+npm run build
+# Output ada di folder dist/
+```
+
+### Langkah 2: Upload ke VPS
+
+```bash
+# Upload dist/ ke VPS
+scp -r dist/ user@your-vps-ip:/var/www/mantra-ai/
+```
+
+### Langkah 3: Konfigurasi Nginx
+
+```nginx
+server {
+    listen 80;
+    server_name yourdomain.com www.yourdomain.com;
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name yourdomain.com www.yourdomain.com;
+
+    # SSL (Let's Encrypt)
+    ssl_certificate /etc/letsencrypt/live/yourdomain.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/yourdomain.com/privkey.pem;
+
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+    # Gzip compression
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml text/javascript image/svg+xml;
+
+    root /var/www/mantra-ai;
+    index index.html;
+
+    # SPA routing — semua route diarahkan ke index.html
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Cache static assets
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|otf)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # Deny access to hidden files
+    location ~ /\. {
+        deny all;
+    }
+}
+```
+
+### Langkah 4: Setup SSL dengan Let's Encrypt
+
+```bash
+sudo apt install certbot python3-certbot-nginx
+sudo certbot --nginx -d yourdomain.com -d www.yourdomain.com
+```
+
+### Langkah 5: Restart Nginx
+
+```bash
+sudo nginx -t
+sudo systemctl restart nginx
+```
+
+---
+
+## 🔐 Environment Variables
+
+| Variable | Deskripsi | Wajib |
+|----------|-----------|-------|
+| `VITE_SUPABASE_URL` | URL backend (otomatis dari Lovable Cloud) | ✅ |
+| `VITE_SUPABASE_PUBLISHABLE_KEY` | Public API key (otomatis) | ✅ |
+
+> **Catatan**: Saat menggunakan Lovable Cloud, semua environment variables sudah otomatis dikonfigurasi. Anda hanya perlu mengaturnya manual jika deploy ke VPS sendiri.
+
+---
+
+## 📊 Fitur Utama
+
+- **Landing Page**: Halaman marketing dengan SEO lengkap, JSON-LD structured data
+- **Admin Dashboard**: Manajemen klien, device WhatsApp, knowledge base, monitoring
+- **Authentication**: Login/register dengan email verification
+- **Role-Based Access**: Hanya admin yang bisa mengakses dashboard
+- **Anti-Bot**: Honeypot field pada form login/register
+- **SEO Ready**: Meta tags, Open Graph, sitemap.xml, robots.txt, AI crawler support
+- **AI Search Discoverable**: Structured data untuk Perplexity, ChatGPT, Gemini
+
+---
+
+## 🤝 Kontribusi
+
+1. Fork repository ini
+2. Buat branch fitur: `git checkout -b fitur/nama-fitur`
+3. Commit perubahan: `git commit -m "Tambah fitur X"`
+4. Push ke branch: `git push origin fitur/nama-fitur`
+5. Buat Pull Request
+
+### Panduan Kode
+
+- Gunakan TypeScript strict mode
+- Ikuti design system (semantic tokens dari `index.css`)
+- Komponen UI menggunakan shadcn/ui
+- Semua warna harus menggunakan HSL via CSS variables
+- Test sebelum commit
+
+---
+
+## 📄 Lisensi
+
+© 2026 Mantra AI. All rights reserved.
+
+---
+
+## 📞 Kontak
+
+- **Email**: hello00mantra@gmail.com
+- **Instagram**: [@hiimantra](https://instagram.com/hiimantra)
+- **WhatsApp**: [+62 821-2508-6328](https://wa.me/6282125086328)
