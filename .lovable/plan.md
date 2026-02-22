@@ -1,101 +1,150 @@
 
 
-# Review & Improvement Landing Page MANTRA -- Perspektif Sales & Marketing
+# Implementasi Tandem System (AI + Human Handoff) dengan Evolution API
 
-## Analisis Masalah Saat Ini
+## Ringkasan Perubahan dari Prompt Sebelumnya
 
-Setelah review seluruh landing page, berikut temuan dan rencana perbaikan:
+Karena Meta WhatsApp Official API sulit didapatkan, sekarang menggunakan **Evolution API** (open-source REST API wrapper untuk WhatsApp Web). Ini selaras dengan fitur QR Code scan yang sudah ada di DeviceManager.
 
-### 1. FAQ -- Rewrite Total (Prioritas Tinggi)
+---
 
-**Masalah**: FAQ saat ini terlalu "corporate" dan defensif. Jawaban pendek, tidak ada hook emosional, tidak ada social proof dalam jawaban. Juga masih menyebut "Shopee, Tokopedia, Lazada, Bukalapak" yang tidak realistis.
+## Fase 1: Database Schema Baru
 
-**Solusi**: Rewrite seluruh FAQ dengan gaya percakapan yang lebih persuasif, terinspirasi dari screenshot yang diberikan. Pertanyaan ditulis dari sudut keraguan nyata calon customer, jawaban mematahkan keraguan dengan data + retorika.
+Buat 3 tabel baru + tambah kolom `role_tag` di tabel `documents`:
 
-**Konten FAQ baru:**
+**Tabel `wa_customers`**
+- `id` uuid PK
+- `client_id` uuid FK -> clients
+- `phone_number` text (unique per client via unique constraint)
+- `name` text nullable
+- `created_at` timestamptz
 
-| Kategori | Pertanyaan | Gaya Jawaban |
-|----------|-----------|--------------|
-| Keraguan Umum | "Bisnis saya masih kecil, apa perlu automation?" | FOMO + logika scaling |
-| Keraguan Umum | "Saya takut bot terasa tidak personal, customer kabur" | Social proof 87% tidak sadar chat dengan AI |
-| Keraguan Umum | "Bagaimana kalau ada komplain atau case rumit?" | Escalation otomatis, human touch tetap ada |
-| Keraguan Umum | "Kompetitor saya belum pakai AI, ngapain saya duluan?" | First mover advantage, response 3 detik vs 3-4 jam |
-| Teknis & Setup | "Apakah saya perlu kemampuan teknis?" | Tim MANTRA urus semua, owner tinggal approve |
-| Teknis & Setup | "Berapa lama proses setup?" | 1-2 minggu, bisa lebih cepat |
-| Teknis & Setup | "Platform apa saja yang didukung?" | WhatsApp & Instagram (hapus marketplace) |
-| Teknis & Setup | "Bagaimana jika saya sudah punya sistem lain?" | Integrasi fleksibel, tidak perlu ganti semua |
-| Investasi & ROI | "Berapa cepat saya bisa lihat hasilnya?" | Minggu pertama sudah terasa, ROI 1-2 bulan |
-| Investasi & ROI | "Kenapa harus bayar setup fee?" | Analogin dengan franchise, bukan template |
-| Investasi & ROI | "Ada biaya tersembunyi?" | Tidak ada, harga final |
-| Cocok untuk Siapa? | "Industri apa saja yang cocok?" | F&B, fashion, jasa, dll + contoh nyata |
-| Cocok untuk Siapa? | "Apakah cocok untuk bisnis yang baru mulai?" | Starter dirancang untuk ini |
+**Tabel `wa_conversations`**
+- `id` uuid PK
+- `client_id` uuid FK -> clients
+- `customer_id` uuid FK -> wa_customers
+- `handled_by` text default 'AI' (values: 'AI', 'HUMAN')
+- `status` text default 'active' (values: 'active', 'closed')
+- `created_at` timestamptz
+- `updated_at` timestamptz
 
-### 2. About Section -- Tambah "Pain yang Kami Selesaikan" (Sesuai Screenshot)
+**Tabel `wa_messages`**
+- `id` uuid PK
+- `conversation_id` uuid FK -> wa_conversations
+- `sender` text (values: 'USER', 'AI', 'ADMIN')
+- `content` text
+- `created_at` timestamptz
 
-**Masalah**: Section About saat ini terlalu generik. Screenshot menunjukkan konsep "Pain yang Kami Selesaikan" yang jauh lebih powerful karena langsung menyentuh masalah nyata owner UMKM.
+**Perubahan tabel `documents`**
+- Tambah kolom `role_tag` text nullable (values: 'admin', 'warehouse', 'owner')
 
-**Solusi**: 
-- Ubah headline menjadi "Kami Paham **Sakitnya** Bisnis Anda"
-- Ubah subtitle menjadi copy yang lebih empatis
-- Tambahkan blok "Pain yang Kami Selesaikan" dengan 6 pain point spesifik (dari screenshot):
-  - Owner kerja 14 jam/hari tapi bisnis jalan di tempat
-  - Stok tidak sinkron, overselling terus-terusan
-  - Admin resign, bisnis langsung chaos karena no system
-  - Data customer berserakan di mana-mana
-  - Customer complain slow response, padahal tim sudah kewalahan
-  - Scaling bisnis = scaling headache
-- Update copywriting values cards agar lebih tajam (sesuai screenshot):
-  - "Speed Over Perfection" -> "Kami lebih pilih 80% automation yang jalan minggu depan..."
-  - "Transparansi Total" -> "Harga yang kami quote adalah harga final..."
-  - "Partner, Bukan Vendor" -> "Kami tidak jual software lalu tinggal..."
+Semua tabel baru mendapat:
+- RLS policy PERMISSIVE untuk admin (is_admin())
+- Realtime enabled untuk `wa_conversations` dan `wa_messages`
 
-### 3. Testimonials -- Fix Referensi "SUARA"
+---
 
-**Masalah**: Testimoni Mas Fikri masih menyebut "SUARA bantu bikin caption..." padahal fitur SUARA sudah dihapus.
+## Fase 2: Edge Function `wa-webhook`
 
-**Solusi**: Ganti quote Mas Fikri menjadi sesuatu tentang CS/sales automation, bukan content creation.
+Endpoint untuk menerima pesan masuk dari Evolution API. Struktur generic sehingga mudah diadaptasi ke Twilio atau provider lain.
 
-### 4. Section Order -- Optimasi Funnel Konversi
+**Alur:**
+1. Terima POST dari Evolution API (verify token via header/query param)
+2. Extract phone number + message body
+3. Lookup client_id dari wa_sessions (based on instance/session yang terhubung)
+4. Lookup/create wa_customers berdasarkan phone number + client_id
+5. Lookup/create wa_conversations yang status 'active' untuk customer ini
+6. Cek `handled_by`:
+   - **'AI'**: Panggil RAG (reuse logic test-rag), simpan pesan USER + pesan AI ke wa_messages, kirim reply via Evolution API (dengan delay 2-4 detik + typing indicator sesuai SOP anti-ban)
+   - **'HUMAN'**: Simpan pesan USER ke wa_messages saja (admin reply dari dashboard)
+7. Jika AI return 'ESKALASI_HUMAN': update handled_by ke 'HUMAN', kirim pesan eskalasi ke user, simpan ke wa_messages
 
-**Masalah**: Urutan section saat ini belum optimal untuk funnel konversi. `About` ada di akhir sebelum FAQ, padahal trust-building harus lebih awal.
+**Safety Guardrails (SOP Anti-Ban):**
+- Delay 2-4 detik sebelum reply + typing indicator
+- Hanya inbound (tidak broadcast)
+- Batas harian per client (configurable, default 300)
 
-**Solusi**: Pindahkan About (dengan pain points baru) ke posisi sebelum Pricing, karena visitor perlu merasa "mereka paham masalah saya" sebelum melihat harga.
+**Secrets yang dibutuhkan:**
+- `EVOLUTION_API_URL` - URL instance Evolution API
+- `EVOLUTION_API_KEY` - API key Evolution API
+- `WA_WEBHOOK_SECRET` - Secret untuk verifikasi webhook
 
-Urutan baru:
-1. Hero
-2. ChatDemo
-3. Problem (CS Manusia vs MANTRA)
-4. AdminCostCalculator
-5. Features
-6. ROICalculator
-7. HowItWorks
-8. Testimonials
-9. **About** (dengan Pain Points) -- dipindah ke sini
-10. Pricing
-11. PaymentScheme
-12. FAQ
-13. FinalCTA
+---
+
+## Fase 3: Edge Function `wa-send-message`
+
+Fungsi terpisah untuk mengirim pesan WhatsApp via Evolution API. Dipakai oleh:
+- wa-webhook (reply AI + pesan eskalasi)
+- Admin dashboard (reply manual admin)
+
+**Fitur:**
+- Kirim typing indicator (composing) selama 2-4 detik random
+- Kirim pesan teks
+- Log pesan ke wa_messages
+
+---
+
+## Fase 4: Admin Inbox Dashboard (`/admin/inbox`)
+
+Halaman baru dengan layout split-view:
+
+**Sidebar kiri:**
+- Daftar conversations, dikelompokkan: "Butuh Admin" (HUMAN) di atas, "Ditangani AI" di bawah
+- Badge unread / highlight merah untuk HUMAN conversations
+- Filter by client
+- Realtime update via Supabase channel
+
+**Panel kanan (Chat):**
+- Header: nama customer + phone number + badge handled_by
+- Chat history: bubble berbeda warna per sender (USER = abu, AI = biru, ADMIN = hijau)
+- Input box untuk admin reply (hanya aktif jika handled_by = 'HUMAN')
+- Tombol toggle: "Ambil Alih" (switch ke HUMAN) / "Serahkan ke AI" (switch ke AI)
+- Realtime: subscribe ke wa_messages untuk conversation yang sedang dilihat
+
+---
+
+## Fase 5: Update Navigasi + Routing
+
+- Tambah menu "Inbox" di AdminSidebar (icon: MessageSquare)
+- Tambah route `/admin/inbox` di App.tsx
+- Update DeviceManager: tambah info bahwa Evolution API instance perlu dihubungkan
+
+---
+
+## Fase 6: Update Knowledge Base UI
+
+- Tambah dropdown `role_tag` saat upload dokumen (opsional, default null = semua role)
+- Tampilkan role_tag di tabel dokumen
 
 ---
 
 ## Detail Teknis
 
-### File yang diubah:
+### File baru:
+- `supabase/functions/wa-webhook/index.ts` - Webhook receiver
+- `supabase/functions/wa-send-message/index.ts` - WhatsApp message sender
+- `src/pages/admin/Inbox.tsx` - Admin live chat page
+- `src/components/admin/InboxSidebar.tsx` - Conversation list sidebar
+- `src/components/admin/InboxChat.tsx` - Chat panel
 
-**`src/components/landing/FAQ.tsx`**
-- Rewrite seluruh array `categories` dengan konten FAQ baru yang lebih persuasif
-- Hapus referensi "Shopee, Tokopedia, Lazada, Bukalapak" dari jawaban
-- Tambah icon per tab kategori (sesuai screenshot: target, settings, wallet, users)
+### File yang dimodifikasi:
+- `src/App.tsx` - Tambah route /admin/inbox
+- `src/components/admin/AdminSidebar.tsx` - Tambah menu Inbox
+- `src/pages/admin/KnowledgeBase.tsx` - Tambah role_tag selector
+- `supabase/config.toml` - Register fungsi baru
+- 1 migration file untuk schema baru
 
-**`src/components/landing/About.tsx`**
-- Ubah headline ke "Kami Paham Sakitnya Bisnis Anda"
-- Ubah subtitle ke copy empati dari screenshot
-- Tambah blok "Pain yang Kami Selesaikan" dengan 6 pain point dalam grid 3x2
-- Update copywriting values cards agar lebih panjang dan persuasif (sesuai screenshot)
+### Urutan implementasi:
+1. Migration (schema + RLS + realtime)
+2. wa-send-message edge function
+3. wa-webhook edge function
+4. Admin Inbox UI (sidebar + chat)
+5. Routing + navigasi
+6. Knowledge Base role_tag update
 
-**`src/components/landing/Testimonials.tsx`**
-- Ganti quote Mas Fikri dari "SUARA" ke testimoni tentang CS/sales automation
-
-**`src/pages/Index.tsx`**
-- Pindahkan posisi `About` dari setelah PaymentScheme ke sebelum Pricing
+### Catatan penting:
+- **Evolution API** harus di-deploy sendiri di VPS (Docker). URL-nya disimpan sebagai secret.
+- **Webhook URL** dari Edge Function akan di-set di Evolution API dashboard sebagai callback.
+- System prompt RAG diupdate: jika AI tidak bisa jawab, reply "ESKALASI_HUMAN" (bukan fallback message).
+- Batas harian 300 percakapan bisa di-adjust per client di tabel clients (tambah kolom `daily_message_limit`).
 
