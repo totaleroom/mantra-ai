@@ -1,93 +1,29 @@
 
 
-# Perbaikan End-to-End + Optimasi + Signup Text
+# Fix Build Error + Access Denied
 
-## Temuan dari Audit
+## Masalah
 
-Setelah melakukan pengecekan menyeluruh, berikut temuan dan rencana perbaikan:
+Ada **2 bug** yang menyebabkan "Access Denied" dan build failure:
 
-### 1. Login Page — Signup Text
-Halaman login sudah memiliki toggle "Belum punya akun? Daftar". Akan diperkecil dan dibuat lebih jelas sebagai teks biasa (bukan tombol ghost) agar lebih mudah ditemukan.
+### 1. CSP Meta Tag Duplikat di `index.html` (Build Error)
+Line 7 berisi **dua meta tag CSP yang digabung jadi satu baris**, menyebabkan HTML parse error. Ini terjadi karena edit sebelumnya menambah CSP baru tanpa menghapus yang lama, sehingga keduanya menyatu.
 
-### 2. Bug Kritis: Anti-Iframe Memblokir Preview
-Kode framebusting di `src/main.tsx` (`window.top !== window.self`) memblokir app saat dijalankan di dalam iframe — termasuk di Lovable preview. Perbaikan: hanya aktifkan di production domain (bukan di `*.lovableproject.com` atau `*.lovable.app`).
+**Perbaikan:** Ganti line 7 dengan satu meta tag CSP yang benar:
+```html
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https: blob:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; frame-ancestors 'self' https://*.lovableproject.com https://*.lovable.app; object-src 'none'; base-uri 'self';" />
+```
 
-### 3. Bug CSP: Realtime WebSocket Diblokir
-CSP di `index.html` tidak menyertakan `wss://*.supabase.co` di `connect-src`. Ini akan memblokir Supabase Realtime (dipakai oleh Device & Connection untuk QR live update). Perbaikan: tambah `wss://*.supabase.co` ke `connect-src`.
-
-### 4. React Warning: forwardRef pada App
-Console menunjukkan warning "Function components cannot be given refs" pada `App`. Ini karena App component di-render sebagai arrow function tanpa forwardRef. Tidak kritis tapi akan di-fix.
-
-### 5. Responsiveness
-- Landing page: Sudah responsif di mobile (390px), tablet, dan desktop
-- Login page: Sudah responsif di semua ukuran
-- Admin pages: Menggunakan Sidebar component yang sudah collapsible di mobile
-
-### 6. Asset Compression
-Logo PNG files (`logo_mantra.png`, `logo_mantra_horizontal.png`) kemungkinan besar oversize untuk kebutuhan tampil sebagai ikon 64px dan header 28px. Kita bisa mengompres atau menggunakan dimensi yang lebih kecil. Akan dicek ukuran aktual dan kompres jika perlu, atau tambahkan `loading="lazy"` + `width/height` attributes.
-
-### 7. Performance Quick Wins
-- Tambah `loading="lazy"` pada gambar yang tidak di above-the-fold
-- Tambah explicit `width` dan `height` pada `<img>` tag untuk menghindari layout shift
+### 2. Framebusting di `src/main.tsx`
+Kode framebusting sudah benar (mengizinkan domain Lovable), jadi setelah build error diperbaiki, preview seharusnya berfungsi normal.
 
 ---
 
-## Rencana Perubahan
+## File yang Diubah
 
-### File: `src/main.tsx`
-- Perbaiki framebusting: hanya blokir jika bukan domain Lovable (production safety)
+| File | Perubahan |
+|------|-----------|
+| `index.html` | Perbaiki line 7: hapus duplikasi CSP meta tag |
 
-### File: `index.html`
-- Tambah `wss://*.supabase.co` ke CSP `connect-src`
-
-### File: `src/pages/Login.tsx`
-- Ubah toggle "Belum punya akun? Daftar" dari Button ghost menjadi teks kecil `<p>` yang lebih natural
-- Pastikan tetap berfungsi sebagai toggle
-
-### File: `src/components/landing/Navbar.tsx`, `Footer.tsx`, `AdminSidebar.tsx`
-- Tambah `loading="lazy"`, `width`, `height` pada logo images
-- Pastikan dimensi sesuai kebutuhan tampil
-
-### File: `src/App.tsx`
-- Tidak ada perubahan diperlukan (warning hanya development, tidak mempengaruhi production)
-
----
-
-## Detail Teknis
-
-### main.tsx — Framebusting Perbaikan
-```typescript
-// Only block iframe in production (not in Lovable preview/dev)
-if (window.top !== window.self) {
-  const hostname = window.location.hostname;
-  const isLovable = hostname.includes('lovableproject.com') || hostname.includes('lovable.app');
-  if (!isLovable) {
-    document.body.innerHTML = '<h1 style="text-align:center;margin-top:40vh;font-family:sans-serif">Access Denied</h1>';
-  }
-}
-```
-
-### index.html — CSP Fix
-```text
-connect-src 'self' https://*.supabase.co wss://*.supabase.co;
-```
-
-### Login.tsx — Signup Text
-Ganti Button ghost dengan teks kecil:
-```tsx
-<p className="mt-4 text-center text-sm text-muted-foreground">
-  {mode === "login" ? "Belum punya akun? " : "Sudah punya akun? "}
-  <button
-    type="button"
-    onClick={() => setMode(mode === "login" ? "register" : "login")}
-    className="font-medium text-primary underline-offset-4 hover:underline"
-  >
-    {mode === "login" ? "Daftar di sini" : "Masuk"}
-  </button>
-</p>
-```
-
-### Image Optimization
-- Tambah `width` dan `height` explicit pada semua `<img>` tag
-- Tambah `loading="lazy"` pada logo di footer (below fold)
+Hanya 1 file, 1 baris yang perlu diperbaiki.
 
