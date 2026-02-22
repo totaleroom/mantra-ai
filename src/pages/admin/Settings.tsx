@@ -19,6 +19,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Loader2, Plus, Trash2, TestTube, Save, Copy, CheckCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useQueryClient } from "@tanstack/react-query";
+import { useSettings, useAdminUsers } from "@/hooks/useAdminData";
 
 interface Admin {
   id: string;
@@ -34,9 +36,10 @@ const PROMPT_PRESETS: Record<string, string> = {
 
 export default function Settings() {
   const { toast } = useToast();
-  const [loading, setLoading] = useState(true);
+  const qc = useQueryClient();
+  const { data: loadedSettings, isLoading: loadingSettings } = useSettings();
+  const { data: admins = [], isLoading: loadingAdmins } = useAdminUsers();
   const [settings, setSettings] = useState<Record<string, string>>({});
-  const [admins, setAdmins] = useState<Admin[]>([]);
   const [saving, setSaving] = useState(false);
   const [activePreset, setActivePreset] = useState("custom");
 
@@ -53,38 +56,20 @@ export default function Settings() {
 
   const webhookUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/wa-webhook`;
 
-  useEffect(() => { loadData(); }, []);
-
-  const loadData = async () => {
-    setLoading(true);
-    await Promise.all([loadSettings(), loadAdmins()]);
-    setLoading(false);
-  };
-
-  const loadSettings = async () => {
-    const res = await supabase.functions.invoke("manage-settings", { method: "GET" });
-    if (res.error) {
-      toast({ variant: "destructive", title: "Error", description: res.error.message });
-      return;
+  // Sync loaded settings into local state
+  useEffect(() => {
+    if (loadedSettings) {
+      setSettings(loadedSettings);
+      const currentPrompt = loadedSettings.ai_system_prompt?.replace(/^"|"$/g, "") || "";
+      if (currentPrompt === PROMPT_PRESETS.professional) setActivePreset("professional");
+      else if (currentPrompt === PROMPT_PRESETS.friendly) setActivePreset("friendly");
+      else setActivePreset("custom");
     }
-    const s = res.data?.settings || {};
-    setSettings(s);
+  }, [loadedSettings]);
 
-    // Detect active preset
-    const currentPrompt = s.ai_system_prompt?.replace(/^"|"$/g, "") || "";
-    if (currentPrompt === PROMPT_PRESETS.professional) setActivePreset("professional");
-    else if (currentPrompt === PROMPT_PRESETS.friendly) setActivePreset("friendly");
-    else setActivePreset("custom");
-  };
+  const loading = loadingSettings && loadingAdmins;
 
-  const loadAdmins = async () => {
-    const res = await supabase.functions.invoke("manage-admin", { method: "GET" });
-    if (res.error) {
-      toast({ variant: "destructive", title: "Error", description: res.error.message });
-      return;
-    }
-    setAdmins(res.data?.admins || []);
-  };
+  // loadAdmins is handled by useAdminUsers hook
 
   const saveSettings = async (updates: Record<string, string>) => {
     setSaving(true);
@@ -109,7 +94,7 @@ export default function Settings() {
       setInviteOpen(false);
       setInviteEmail("");
       setInvitePassword("");
-      loadAdmins();
+      qc.invalidateQueries({ queryKey: ["adminUsers"] });
     }
     setInviting(false);
   };
@@ -120,7 +105,7 @@ export default function Settings() {
       toast({ variant: "destructive", title: "Error", description: res.error?.message || res.data?.error });
     } else {
       toast({ title: "Admin dihapus" });
-      loadAdmins();
+      qc.invalidateQueries({ queryKey: ["adminUsers"] });
     }
   };
 

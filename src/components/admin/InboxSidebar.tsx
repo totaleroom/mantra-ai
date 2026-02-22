@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -12,8 +11,8 @@ import { User, Bot, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import { id as idLocale } from "date-fns/locale";
+import { useClientsList, useInboxConversations } from "@/hooks/useAdminData";
 
-interface Client { id: string; name: string; }
 interface Conversation {
   id: string;
   client_id: string;
@@ -32,92 +31,14 @@ interface InboxSidebarProps {
 }
 
 export default function InboxSidebar({ selectedConvoId, onSelectConvo }: InboxSidebarProps) {
-  const [clients, setClients] = useState<Client[]>([]);
   const [selectedClientId, setSelectedClientId] = useState("all");
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    supabase.from("clients" as any).select("id, name").order("name").then(({ data }) => {
-      setClients((data as any[] || []) as Client[]);
-    });
-  }, []);
-
-  const fetchConversations = async () => {
-    setLoading(true);
-    let query = supabase
-      .from("wa_conversations" as any)
-      .select("id, client_id, customer_id, handled_by, status, updated_at")
-      .eq("status", "active")
-      .order("updated_at", { ascending: false });
-
-    if (selectedClientId !== "all") {
-      query = query.eq("client_id", selectedClientId);
-    }
-
-    const { data: convos } = await query;
-    if (!convos || (convos as any[]).length === 0) {
-      setConversations([]);
-      setLoading(false);
-      return;
-    }
-
-    const customerIds = [...new Set((convos as any[]).map((c: any) => c.customer_id))];
-    const { data: customers } = await supabase
-      .from("wa_customers" as any)
-      .select("id, name, phone_number")
-      .in("id", customerIds);
-
-    const customerMap = new Map(
-      ((customers as any[]) || []).map((c: any) => [c.id, c])
-    );
-
-    const convoIds = (convos as any[]).map((c: any) => c.id);
-    const { data: lastMessages } = await supabase
-      .from("wa_messages" as any)
-      .select("conversation_id, content")
-      .in("conversation_id", convoIds)
-      .order("created_at", { ascending: false });
-
-    const lastMsgMap = new Map<string, string>();
-    if (lastMessages) {
-      for (const msg of lastMessages as any[]) {
-        if (!lastMsgMap.has(msg.conversation_id)) {
-          lastMsgMap.set(msg.conversation_id, msg.content);
-        }
-      }
-    }
-
-    const enriched: Conversation[] = (convos as any[]).map((c: any) => {
-      const cust = customerMap.get(c.customer_id);
-      return {
-        ...c,
-        customer_name: cust?.name || null,
-        customer_phone: cust?.phone_number || "",
-        last_message: lastMsgMap.get(c.id) || null,
-      };
-    });
-
-    setConversations(enriched);
-    setLoading(false);
-  };
-
-  useEffect(() => { fetchConversations(); }, [selectedClientId]);
-
-  useEffect(() => {
-    const channel = supabase
-      .channel("inbox-conversations")
-      .on("postgres_changes", { event: "*", schema: "public", table: "wa_conversations" }, () => fetchConversations())
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "wa_messages" }, () => fetchConversations())
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
-  }, [selectedClientId]);
+  const { data: clients = [] } = useClientsList();
+  const { data: conversations = [], isLoading: loading } = useInboxConversations(selectedClientId);
 
   // Group by client
   const clientMap = new Map(clients.map((c) => [c.id, c.name]));
   const grouped = new Map<string, Conversation[]>();
-  for (const convo of conversations) {
+  for (const convo of conversations as Conversation[]) {
     const clientName = clientMap.get(convo.client_id) || "Unknown";
     if (!grouped.has(clientName)) grouped.set(clientName, []);
     grouped.get(clientName)!.push(convo);

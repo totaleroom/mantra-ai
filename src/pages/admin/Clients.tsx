@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,6 +27,8 @@ import { useToast } from "@/hooks/use-toast";
 import { formatDistanceToNow } from "date-fns";
 import { id as idLocale } from "date-fns/locale";
 import QRCode from "react-qr-code";
+import { useQueryClient } from "@tanstack/react-query";
+import { useClients, useWaSessions, useActiveConversations } from "@/hooks/useAdminData";
 
 interface Client {
   id: string;
@@ -62,8 +64,38 @@ function getIndustryBadgeClass(industry: string | null): string {
 }
 
 export default function Clients() {
-  const [clients, setClients] = useState<Client[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const { data: rawClients = [], isLoading: loadingClients } = useClients();
+  const { data: sessions = [] } = useWaSessions();
+  const { data: activeConvos = [] } = useActiveConversations();
+
+  const clients = useMemo(() => {
+    const sessionMap = new Map(sessions.map((s: any) => [s.client_id, s.status]));
+    const convoCountMap = new Map<string, number>();
+    for (const c of activeConvos) {
+      convoCountMap.set(c.client_id, (convoCountMap.get(c.client_id) || 0) + 1);
+    }
+    const enriched: Client[] = rawClients.map((c: any) => ({
+      ...c,
+      wa_status: sessionMap.get(c.id) || "disconnected",
+      live_chats: convoCountMap.get(c.id) || 0,
+    }));
+    enriched.sort((a, b) => {
+      if (!a.last_activity_at && !b.last_activity_at) return 0;
+      if (!a.last_activity_at) return 1;
+      if (!b.last_activity_at) return -1;
+      return new Date(b.last_activity_at).getTime() - new Date(a.last_activity_at).getTime();
+    });
+    return enriched;
+  }, [rawClients, sessions, activeConvos]);
+
+  const loading = loadingClients;
+  const invalidateClients = () => {
+    queryClient.invalidateQueries({ queryKey: ["clients"] });
+    queryClient.invalidateQueries({ queryKey: ["waSessions"] });
+    queryClient.invalidateQueries({ queryKey: ["activeConversations"] });
+  };
+
   const [search, setSearch] = useState("");
   const [industryFilter, setIndustryFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
@@ -88,57 +120,6 @@ export default function Clients() {
   const [promptSaving, setPromptSaving] = useState(false);
 
   const { toast } = useToast();
-
-  const fetchClients = async () => {
-    setLoading(true);
-    const { data: clientsData, error } = await supabase
-      .from("clients" as any)
-      .select("*")
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      toast({ variant: "destructive", title: "Error", description: error.message });
-      setLoading(false);
-      return;
-    }
-
-    // Fetch wa_sessions for status
-    const { data: sessions } = await supabase
-      .from("wa_sessions" as any)
-      .select("client_id, status");
-
-    const sessionMap = new Map((sessions as any[] || []).map((s: any) => [s.client_id, s.status]));
-
-    // Fetch active conversation counts
-    const { data: activeConvos } = await supabase
-      .from("wa_conversations" as any)
-      .select("client_id")
-      .eq("status", "active");
-
-    const convoCountMap = new Map<string, number>();
-    for (const c of (activeConvos as any[] || [])) {
-      convoCountMap.set(c.client_id, (convoCountMap.get(c.client_id) || 0) + 1);
-    }
-
-    const enriched: Client[] = (clientsData as any[] || []).map((c: any) => ({
-      ...c,
-      wa_status: sessionMap.get(c.id) || "disconnected",
-      live_chats: convoCountMap.get(c.id) || 0,
-    }));
-
-    // Sort by last_activity_at desc (nulls last)
-    enriched.sort((a, b) => {
-      if (!a.last_activity_at && !b.last_activity_at) return 0;
-      if (!a.last_activity_at) return 1;
-      if (!b.last_activity_at) return -1;
-      return new Date(b.last_activity_at).getTime() - new Date(a.last_activity_at).getTime();
-    });
-
-    setClients(enriched);
-    setLoading(false);
-  };
-
-  useEffect(() => { fetchClients(); }, []);
 
   const getStatusBadge = (client: Client) => {
     if (client.quota_remaining <= 0)
@@ -172,7 +153,7 @@ export default function Clients() {
       setDialogOpen(false);
       setEditingClient(null);
       setForm({ name: "", industry: "", subscription_plan: "basic", quota_limit: 1000, quota_remaining: 1000, daily_message_limit: 300, status: "active" });
-      fetchClients();
+      invalidateClients();
     } catch (err: any) {
       toast({ variant: "destructive", title: "Error", description: err.message });
     } finally {
@@ -186,7 +167,7 @@ export default function Clients() {
       toast({ variant: "destructive", title: "Error", description: error.message });
     } else {
       toast({ title: "Client dihapus" });
-      fetchClients();
+      invalidateClients();
     }
   };
 
@@ -194,7 +175,7 @@ export default function Clients() {
     const newStatus = client.status === "active" ? "inactive" : "active";
     await supabase.from("clients" as any).update({ status: newStatus } as any).eq("id", client.id);
     toast({ title: `Status diubah ke ${newStatus}` });
-    fetchClients();
+    invalidateClients();
   };
 
   const handleViewQR = async (client: Client) => {

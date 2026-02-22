@@ -1,18 +1,11 @@
-import { useEffect, useState } from "react";
 import { Users, Smartphone, BookOpen, BarChart3, LogOut, MessageSquare, Settings, LayoutDashboard } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/hooks/useAuth";
-import { supabase } from "@/integrations/supabase/client";
+import { useHumanEscalationCount } from "@/hooks/useAdminData";
 import logoHorizontal from "@/assets/logo_mantra_horizontal.png";
 import {
-  Sidebar,
-  SidebarContent,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-  SidebarFooter,
+  Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent,
+  SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarFooter,
 } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 
@@ -28,33 +21,7 @@ const navItems = [
 
 export default function AdminSidebar() {
   const { signOut } = useAuth();
-  const [humanCount, setHumanCount] = useState(0);
-
-  const fetchHumanCount = async () => {
-    const { count } = await supabase
-      .from("wa_conversations" as any)
-      .select("id", { count: "exact", head: true })
-      .eq("handled_by", "HUMAN")
-      .eq("status", "active");
-    setHumanCount(count || 0);
-  };
-
-  useEffect(() => {
-    fetchHumanCount();
-
-    const channel = supabase
-      .channel("sidebar-escalation")
-      .on("postgres_changes", {
-        event: "*",
-        schema: "public",
-        table: "wa_conversations",
-      }, () => {
-        fetchHumanCount();
-      })
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
-  }, []);
+  const { data: humanCount = 0 } = useHumanEscalationCount();
 
   return (
     <Sidebar>
