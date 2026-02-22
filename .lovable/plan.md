@@ -1,231 +1,88 @@
 
 
-# Integrasi WhatsApp + RAG + LLM — Arsitektur & Rencana MVP
+# Rework Landing Page: Harga, Features, dan Problem Section
 
-## Kondisi Saat Ini
+## Ringkasan Perubahan
 
-| Komponen | Status |
-|----------|--------|
-| Dashboard (Clients, Device, Knowledge Base, Monitoring) | UI siap |
-| Database (clients, wa_sessions, documents, message_logs) | Siap + pgvector aktif |
-| Storage bucket "knowledge" | Siap |
-| Edge functions (process-document, test-rag) | Belum dibuat |
-| WhatsApp bridge/server | Belum ada |
-| LLM | Lovable AI tersedia (LOVABLE_API_KEY sudah ada) |
+3 section yang akan diubah:
 
----
+### 1. Section Harga (Pricing.tsx)
+**Dari 3 paket menjadi 2 paket saja**, hapus toggle bulanan/tahunan, hapus semua referensi "SUARA":
 
-## Arsitektur Keseluruhan
+| Paket | Harga | Target |
+|-------|-------|--------|
+| **STARTER** | Rp 250.000/bulan + Setup Rp 2.000.000 | Usaha baru mulai go-digital, 1 channel WhatsApp |
+| **GROWTH** (Populer) | Rp 350.000/bulan + Setup Rp 3.000.000 | UMKM yang ingin scale up, multi-channel |
 
-```text
-HP Konsumen (WhatsApp)
-        |
-        v
-WhatsApp Cloud API (Meta) -- gratis 1000 percakapan/bulan
-        |
-        v (webhook)
-Edge Function: wa-webhook
-        |
-        +---> Cari dokumen relevan (pgvector similarity search)
-        +---> Kirim ke Lovable AI (gemini-2.5-flash-lite) --> jawaban
-        +---> Kirim balik via WhatsApp Cloud API
-        +---> Log ke message_logs + kurangi quota
-```
+- Hapus paket ENTERPRISE
+- Hapus toggle bulanan/tahunan (tampilkan harga bulanan saja, lebih jujur dan simpel)
+- Hapus semua baris "Content creator (SUARA)" dari fitur
+- Layout berubah dari 3 kolom ke 2 kolom (`md:grid-cols-2` dengan `max-w-3xl`)
 
----
+### 2. Section Peralatan MANTRA (Features.tsx)
+- **Hapus card SUARA** (Content Creator) seluruhnya
+- Sisa 2 card: PENJAGA (AI Customer Service) dan INGATAN (Data & Stock Hub)
+- Layout berubah dari 3 kolom ke 2 kolom (`md:grid-cols-2`)
+- Hapus referensi "Shopee, Tokopedia" dari bullet PENJAGA karena integrasi marketplace chat belum realistis (lihat penjelasan di bawah)
+- Ubah bullet menjadi "Multi-platform: WhatsApp & Instagram" saja
 
-## Opsi WhatsApp Integration (Murah/Gratis)
+### 3. Section Masalah (Problem.tsx)
+**Rewrite total** headline dan konten. Konsep baru: **CS Manusia vs MANTRA** -- bukan "chatbot vs MANTRA".
 
-### Opsi 1: Meta WhatsApp Cloud API (REKOMENDASI)
+**Headline baru:**
+> "CS Manusia Punya Batas. **MANTRA Tidak.**"
 
-| Aspek | Detail |
-|-------|--------|
-| Biaya | Gratis 1000 percakapan/bulan (service conversations) |
-| Keandalan | Official API, tidak akan di-ban |
-| Setup | Perlu Facebook Business account + verifikasi |
-| Cocok untuk | Production, MVP, testing |
+**Subtitle baru:**
+> "Karyawan bisa capek, bad mood, lupa SOP. MANTRA selalu ramah, patuh, dan tahu cara menangani pelanggan yang marah sekalipun."
 
-Langkah setup:
-1. Buat akun di [developers.facebook.com](https://developers.facebook.com)
-2. Buat app baru -> pilih "Business" -> tambahkan WhatsApp product
-3. Dapatkan **Phone Number ID**, **WhatsApp Business Account ID**, dan **Permanent Access Token**
-4. Set webhook URL ke edge function kita
-5. Nomor test (082125086328) bisa didaftarkan sebagai test number
+**Konten perbandingan baru (Cara Lama = CS Manusia):**
 
-### Opsi 2: whatsapp-web.js / Baileys (Gratis tapi berisiko)
-
-| Aspek | Detail |
-|-------|--------|
-| Biaya | Gratis |
-| Keandalan | Unofficial, risiko ban dari WhatsApp |
-| Setup | Perlu VPS terpisah (Node.js server) |
-| Cocok untuk | Prototype saja, TIDAK untuk production |
-
-### Rekomendasi: Opsi 1 (Meta Cloud API)
-
-Untuk testing dengan nomor 082125086328, Meta Cloud API menyediakan sandbox mode gratis.
+| CS Manusia | MANTRA |
+|-----------|--------|
+| Mood karyawan berubah-ubah, kadang ketus ke pelanggan | Selalu ramah & sabar, bahkan saat pelanggan marah |
+| Sering lupa SOP, jawaban tidak konsisten | 100% patuh SOP, jawaban selalu sesuai arahan owner |
+| Hanya bisa kerja 8 jam, libur di hari besar | Online 24/7, tidak kenal libur atau jam istirahat |
+| Butuh training berulang setiap ada produk/promo baru | Update knowledge base sekali, langsung paham semua |
 
 ---
 
-## LLM: Strategi Hemat + Anti-Halusinasi
+## Soal Omni-Channel (Tokopedia, Shopee)
 
-### Model yang dipakai: `google/gemini-2.5-flash-lite`
+Jawaban jujur: **Tokopedia dan Shopee tidak membuka API chat mereka untuk umum.**
 
-| Aspek | Detail |
-|-------|--------|
-| Biaya | Paling murah di Lovable AI |
-| Kecepatan | Paling cepat |
-| Cocok untuk | Menjawab pertanyaan berdasarkan konteks dokumen |
+- **Tokopedia**: Chat API hanya tersedia untuk mitra resmi Tokopedia (program Mitra Tokopedia). Tidak bisa diakses developer biasa.
+- **Shopee**: Open Platform punya fitur chat terbatas, tapi butuh approval sebagai partner resmi dan prosesnya panjang.
+- **Instagram**: Bisa diintegrasikan via **Meta Messenger API** (satu ekosistem dengan WhatsApp Cloud API). Ini realistis.
 
-### Strategi Anti-Halusinasi (RAG Guardrails)
+**Rekomendasi realistis untuk MANTRA:**
+- **WhatsApp** -- channel utama, sudah direncanakan
+- **Instagram DM** -- bisa ditambahkan nanti via Meta API (gratis, satu token dengan WhatsApp)
+- **Tokopedia/Shopee** -- belum bisa, kecuali jadi mitra resmi
 
-1. **System prompt ketat**: AI hanya boleh menjawab berdasarkan konteks yang diberikan
-2. **Similarity threshold**: Jika skor kesamaan dokumen < 0.7, jangan jawab — balas "Maaf, saya belum punya info tentang itu. Silakan hubungi admin langsung."
-3. **Fallback message**: Jika tidak ada dokumen yang relevan, kirim pesan default + nomor admin
-4. **Temperature 0**: Tidak ada kreativitas, jawab apa adanya
-5. **Max tokens dibatasi**: Jawaban singkat dan padat (max 300 tokens)
-
-System prompt contoh:
-```
-Kamu adalah asisten customer service untuk {nama_bisnis}.
-Jawab HANYA berdasarkan informasi berikut. Jika jawabannya tidak ada di informasi ini, katakan "Maaf kak, untuk pertanyaan ini silakan hubungi admin kami langsung ya."
-Gunakan bahasa santai dan ramah seperti chat WhatsApp. Panggil customer "kak".
-JANGAN mengarang informasi. JANGAN membuat harga atau produk yang tidak ada di informasi.
-
-INFORMASI:
-{konteks_dari_dokumen}
-```
+Oleh karena itu, di landing page kita sebaiknya tulis "WhatsApp & Instagram" saja, bukan klaim marketplace yang belum bisa.
 
 ---
 
-## RAG Pipeline yang Dibangun
+## Detail Teknis
 
-### Edge Function 1: `process-document`
+### File yang diubah:
 
-Dipanggil setelah file di-upload ke storage.
+**`src/components/landing/Pricing.tsx`**
+- Hapus `useState` dan toggle bulanan/tahunan
+- Kurangi array `plans` dari 3 menjadi 2 (hapus ENTERPRISE)
+- Hapus fitur "Content creator (SUARA)" dari kedua paket
+- Ubah grid dari `md:grid-cols-3` ke `md:grid-cols-2` dengan `max-w-3xl mx-auto`
+- Harga ditampilkan statis (bulanan saja)
 
-```text
-File PDF/TXT di storage
-    |
-    v
-Parse teks (PDF -> text)
-    |
-    v
-Chunking (split per ~500 karakter dengan overlap 50)
-    |
-    v
-Embedding via Lovable AI (gemini model)
-    |
-    v
-Simpan ke tabel documents (content, embedding, chunk_index)
-    |
-    v
-Update status -> "ready"
-```
+**`src/components/landing/Features.tsx`**
+- Hapus objek SUARA dari array `features`
+- Ubah bullet PENJAGA dari "WA, IG, Shopee, Tokopedia" ke "WhatsApp & Instagram"
+- Ubah grid dari `md:grid-cols-3` ke `md:grid-cols-2`
+- Hapus import `Megaphone` (tidak dipakai lagi)
 
-Catatan: Karena Lovable AI tidak menyediakan embedding API secara langsung, kita akan menggunakan pendekatan alternatif — simpan teks chunks saja tanpa vector embedding, lalu gunakan keyword search (full-text search PostgreSQL) sebagai MVP. Ini lebih sederhana dan gratis.
-
-### Edge Function 2: `test-rag`
-
-Dipanggil dari dashboard Test Bot dan dari wa-webhook.
-
-```text
-Pertanyaan masuk
-    |
-    v
-Full-text search di tabel documents (filter by client_id)
-    |
-    v
-Ambil top 3 chunks paling relevan
-    |
-    v
-Kirim ke Lovable AI (gemini-2.5-flash-lite) dengan system prompt ketat
-    |
-    v
-Return jawaban
-```
-
-### Edge Function 3: `wa-webhook`
-
-Menerima pesan masuk dari WhatsApp Cloud API.
-
-```text
-Webhook POST dari Meta
-    |
-    v
-Validasi signature
-    |
-    v
-Cek client_id dari nomor WA terdaftar
-    |
-    v
-Cek quota_remaining > 0
-    |  (jika habis -> balas "Maaf, silakan hubungi admin")
-    v
-Panggil RAG pipeline (sama seperti test-rag)
-    |
-    v
-Kirim jawaban via WhatsApp Cloud API
-    |
-    v
-Update message_logs + kurangi quota
-```
-
----
-
-## MVP yang Bisa Langsung Dibangun (Tanpa WhatsApp Dulu)
-
-Jika setup Meta WhatsApp Cloud API belum siap, kita bisa bangun dan test semuanya dari dashboard dulu:
-
-### Fase 1: Backend RAG (bisa langsung)
-
-1. **Edge function `process-document`**: Parse file, chunking, simpan ke database
-2. **Edge function `test-rag`**: Full-text search + Lovable AI untuk jawab pertanyaan
-3. **Test dari dashboard**: Upload dokumen -> test bot -> validasi jawaban
-
-### Fase 2: WhatsApp Integration (setelah Meta API siap)
-
-4. **Edge function `wa-webhook`**: Terima pesan, panggil RAG, balas via API
-5. **Update DeviceManager**: Tampilkan status koneksi dari Meta Cloud API
-6. **Monitoring**: Log semua pesan dan token usage
-
----
-
-## Error Handling & Fallback MVP
-
-| Skenario Error | Fallback |
-|----------------|----------|
-| LLM gagal/timeout | Balas: "Maaf kak, sistem sedang sibuk. Coba lagi ya." |
-| Tidak ada dokumen relevan | Balas: "Maaf kak, saya belum punya info itu. Hubungi admin di [nomor]." |
-| Quota habis | Balas: "Maaf kak, layanan otomatis sedang tidak tersedia. Hubungi [nomor]." |
-| Rate limit (429) | Retry 1x setelah 2 detik, lalu fallback message |
-| Dokumen gagal diproses | Update status ke "error", tampilkan di dashboard |
-
----
-
-## Rencana Implementasi (Fase 1 — Langsung Bisa Dikerjakan)
-
-| # | Task | File |
-|---|------|------|
-| 1 | Tambah kolom `ts_content` (tsvector) ke tabel documents untuk full-text search | Migration SQL |
-| 2 | Buat edge function `process-document` (parse, chunk, simpan) | `supabase/functions/process-document/index.ts` |
-| 3 | Buat edge function `test-rag` (search + LLM) | `supabase/functions/test-rag/index.ts` |
-| 4 | Update `supabase/config.toml` untuk register kedua functions | `supabase/config.toml` |
-| 5 | Test upload dokumen + test bot dari dashboard | Verify end-to-end |
-
-### Fase 2 (Setelah Meta API Ready)
-
-| # | Task | File |
-|---|------|------|
-| 6 | Buat edge function `wa-webhook` | `supabase/functions/wa-webhook/index.ts` |
-| 7 | Tambah secrets: META_WA_TOKEN, META_PHONE_NUMBER_ID, META_VERIFY_TOKEN | Secrets |
-| 8 | Update DeviceManager UI untuk Meta Cloud API flow | `src/pages/admin/DeviceManager.tsx` |
-
----
-
-## Yang Perlu Kamu Siapkan
-
-Untuk **Fase 1** (RAG): Tidak perlu apa-apa, langsung bisa dikerjakan karena Lovable AI sudah tersedia.
-
-Untuk **Fase 2** (WhatsApp): Perlu buat akun di [Meta for Developers](https://developers.facebook.com) dan setup WhatsApp Business API. Saya akan bantu panduan langkah-langkahnya nanti.
+**`src/components/landing/Problem.tsx`**
+- Rewrite headline: "CS Manusia Punya Batas. MANTRA Tidak."
+- Rewrite subtitle tentang mood, SOP, kepatuhan
+- Rewrite 4 item perbandingan (CS Manusia vs MANTRA)
+- Ganti label "Cara Lama" menjadi "CS Manusia" dan "Cara MANTRA" tetap
 
