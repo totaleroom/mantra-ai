@@ -44,7 +44,7 @@ export default function KnowledgeBase() {
   const [chatResponse, setChatResponse] = useState("");
   const [chatLoading, setChatLoading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
-  const [uploadRoleTag, setUploadRoleTag] = useState<string>("");
+  const [uploadRoleTag, setUploadRoleTag] = useState<string>("none");
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -74,7 +74,7 @@ export default function KnowledgeBase() {
       const insertData: any = {
         client_id: uploadClientId, file_name: file.name, file_path: path, status: "processing",
       };
-      if (uploadRoleTag) insertData.role_tag = uploadRoleTag;
+      if (uploadRoleTag && uploadRoleTag !== "none") insertData.role_tag = uploadRoleTag;
       const { data: docData } = await (supabase.from("documents" as any).insert(insertData) as any).select("id").single();
 
       if (docData?.id) {
@@ -158,7 +158,7 @@ export default function KnowledgeBase() {
               <SelectValue placeholder="Role Tag (opsional)" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">Semua Role</SelectItem>
+              <SelectItem value="none">Semua Role</SelectItem>
               <SelectItem value="admin">Admin</SelectItem>
               <SelectItem value="warehouse">Warehouse</SelectItem>
               <SelectItem value="owner">Owner</SelectItem>
