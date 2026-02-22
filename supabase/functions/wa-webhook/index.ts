@@ -9,7 +9,6 @@ const corsHeaders = {
 
 /**
  * Detect sector/role_tag from message keywords for targeted RAG search.
- * Returns 'WAREHOUSE', 'OWNER', or null (fallback to all documents).
  */
 function detectSector(message: string): string | null {
   const lower = message.toLowerCase();
@@ -40,24 +39,108 @@ function detectSector(message: string): string | null {
 }
 
 /**
- * wa-webhook: Receives incoming WhatsApp messages from Evolution API
- * 
- * Evolution API sends webhooks for various events. We handle "messages.upsert".
- * 
- * Flow:
- * 1. Verify webhook secret
- * 2. Extract phone number + message
- * 3. Lookup client from wa_sessions by instance name
- * 4. Lookup/create wa_customer
- * 5. Lookup/create wa_conversation
- * 6. If handled_by=AI -> RAG + reply; If HUMAN -> save only
- * 7. If AI returns ESKALASI_HUMAN -> escalate
+ * Build chat messages from history for context memory.
+ * Converts wa_messages rows to OpenAI-compatible message format.
  */
+function buildChatMessages(history: { sender: string; content: string; media_url?: string | null }[]): any[] {
+  return history.map((msg) => {
+    if (msg.sender === "USER") {
+      // If message has media, build multimodal content
+      if (msg.media_url) {
+        const parts: any[] = [
+          { type: "image_url", image_url: { url: msg.media_url } },
+        ];
+        if (msg.content) {
+          parts.push({ type: "text", text: msg.content });
+        } else {
+          parts.push({ type: "text", text: "Customer mengirim gambar ini" });
+        }
+        return { role: "user", content: parts };
+      }
+      return { role: "user", content: msg.content };
+    } else if (msg.sender === "AI") {
+      return { role: "assistant", content: msg.content };
+    } else if (msg.sender === "ADMIN") {
+      return { role: "assistant", content: `[Admin] ${msg.content}` };
+    }
+    return { role: "user", content: msg.content };
+  });
+}
+
+/**
+ * Download media from Evolution API and return base64 string.
+ */
+async function downloadMediaBase64(messageData: any, instanceName: string): Promise<string | null> {
+  try {
+    const EVOLUTION_API_URL = Deno.env.get("EVOLUTION_API_URL")!;
+    const EVOLUTION_API_KEY = Deno.env.get("EVOLUTION_API_KEY")!;
+    const baseUrl = EVOLUTION_API_URL.replace(/\/$/, "");
+
+    const res = await fetch(`${baseUrl}/chat/getBase64FromMediaMessage/${instanceName}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
+      body: JSON.stringify({ message: messageData }),
+    });
+
+    if (!res.ok) {
+      console.error("Media download error:", res.status, await res.text());
+      return null;
+    }
+
+    const data = await res.json();
+    return data.base64 || null;
+  } catch (e) {
+    console.error("Media download failed:", e);
+    return null;
+  }
+}
+
+/**
+ * Upload base64 image to Supabase Storage and return signed URL.
+ */
+async function uploadMediaToStorage(
+  supabase: any,
+  base64: string,
+  conversationId: string,
+  mediaType: string
+): Promise<string | null> {
+  try {
+    const ext = mediaType === "video" ? "mp4" : "jpg";
+    const contentType = mediaType === "video" ? "video/mp4" : "image/jpeg";
+    const path = `media/${conversationId}/${Date.now()}.${ext}`;
+
+    // Decode base64 to Uint8Array
+    const binaryString = atob(base64);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+
+    const { error } = await supabase.storage
+      .from("knowledge")
+      .upload(path, bytes, { contentType, upsert: false });
+
+    if (error) {
+      console.error("Storage upload error:", error.message);
+      return null;
+    }
+
+    // Create signed URL (valid for 1 year)
+    const { data: signedData } = await supabase.storage
+      .from("knowledge")
+      .createSignedUrl(path, 60 * 60 * 24 * 365);
+
+    return signedData?.signedUrl || null;
+  } catch (e) {
+    console.error("Storage upload failed:", e);
+    return null;
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS")
     return new Response(null, { headers: corsHeaders });
 
-  // Only accept POST
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ error: "Method not allowed" }), {
       status: 405,
@@ -79,11 +162,8 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    
-    // Evolution API event types: messages.upsert, connection.update, etc.
     const event = body.event || body.type;
     
-    // Only process incoming messages
     if (event !== "messages.upsert") {
       return new Response(JSON.stringify({ status: "ignored", event }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -99,42 +179,48 @@ serve(async (req) => {
       });
     }
 
-    // Skip if message is from us (outgoing) or is a status update
     if (messageData.key?.fromMe) {
       return new Response(JSON.stringify({ status: "skipped_outgoing" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Extract phone number and message text
     const remoteJid = messageData.key?.remoteJid || "";
     const phoneNumber = remoteJid.replace("@s.whatsapp.net", "").replace("@g.us", "");
     
-    // Only handle direct messages, not group messages
     if (remoteJid.includes("@g.us")) {
       return new Response(JSON.stringify({ status: "skipped_group" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
+    // Extract text message
     const messageText = messageData.message?.conversation || 
       messageData.message?.extendedTextMessage?.text || "";
     
-    if (!messageText.trim()) {
+    // Detect image message
+    const imageMsg = messageData.message?.imageMessage;
+    const hasImage = !!imageMsg;
+    const imageCaption = imageMsg?.caption || "";
+
+    // Skip only if NO text AND NO image
+    if (!messageText.trim() && !hasImage) {
       return new Response(JSON.stringify({ status: "no_text" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
+    // Effective text for RAG search (use caption if image, otherwise messageText)
+    const effectiveText = messageText.trim() || imageCaption.trim();
+
     const pushName = messageData.pushName || "";
 
-    // Setup Supabase admin client
     const supabaseAdmin = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    // 1. Find client_id from wa_sessions by instance name
+    // 1. Find client_id from wa_sessions
     const { data: session } = await supabaseAdmin
       .from("wa_sessions")
       .select("client_id")
@@ -142,7 +228,6 @@ serve(async (req) => {
       .eq("status", "connected")
       .maybeSingle();
 
-    // Fallback: try matching by client_id directly if instance name is UUID
     let clientId = session?.client_id;
     if (!clientId) {
       const { data: sessionByClient } = await supabaseAdmin
@@ -172,7 +257,6 @@ serve(async (req) => {
     const businessName = clientData?.name || "Bisnis Kami";
     const dailyLimit = clientData?.daily_message_limit || 300;
 
-    // Load platform settings for AI config
     const { data: platformSettings } = await supabaseAdmin
       .from("platform_settings")
       .select("key, value");
@@ -213,7 +297,6 @@ serve(async (req) => {
       if (custErr) throw new Error("Failed to create customer: " + custErr.message);
       customer = newCustomer;
     } else if (!customer.name && pushName) {
-      // Update name if we have pushName and customer doesn't have a name yet
       await supabaseAdmin
         .from("wa_customers")
         .update({ name: pushName })
@@ -239,11 +322,26 @@ serve(async (req) => {
       conversation = newConvo;
     }
 
-    // 5. Save incoming USER message
+    // 5. Handle media: download and upload to storage
+    let mediaUrl: string | null = null;
+    let mediaType: string | null = null;
+
+    if (hasImage) {
+      mediaType = "image";
+      const base64 = await downloadMediaBase64(messageData, instanceName);
+      if (base64) {
+        mediaUrl = await uploadMediaToStorage(supabaseAdmin, base64, conversation!.id, "image");
+      }
+    }
+
+    // 6. Save incoming USER message (with media if available)
+    const messageContent = effectiveText || (hasImage ? "[Gambar]" : "");
     await supabaseAdmin.from("wa_messages").insert({
       conversation_id: conversation!.id,
       sender: "USER",
-      content: messageText,
+      content: messageContent,
+      media_url: mediaUrl,
+      media_type: mediaType,
     });
 
     // Update conversation timestamp
@@ -252,40 +350,52 @@ serve(async (req) => {
       .update({ updated_at: new Date().toISOString() })
       .eq("id", conversation!.id);
 
-    // 6. Route based on handled_by
+    // 7. Route based on handled_by
     if (conversation!.handled_by === "HUMAN") {
-      // Just save the message, admin will see it via realtime
       return new Response(
         JSON.stringify({ status: "saved_for_human", conversation_id: conversation!.id }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // handled_by === "AI" -> RAG + reply
-    // Search documents for context
-    // Sector-based RAG: detect role tag from message keywords
-    const roleTag = detectSector(messageText);
+    // === AI HANDLING ===
 
-    const { data: results } = await supabaseAdmin.rpc("search_documents", {
-      p_client_id: clientId,
-      p_query: messageText,
-      p_limit: 3,
-      p_role_tag: roleTag,
-    });
+    // Fetch last 10 messages for context memory
+    const { data: chatHistory } = await supabaseAdmin
+      .from("wa_messages")
+      .select("sender, content, media_url")
+      .eq("conversation_id", conversation!.id)
+      .order("created_at", { ascending: true })
+      .limit(10);
 
-    let contextChunks = results || [];
+    const historyMessages = buildChatMessages(chatHistory || []);
 
-    // Fallback 1: If filtered search returned nothing, retry without role_tag
-    if (contextChunks.length === 0 && roleTag !== null) {
-      const { data: globalResults } = await supabaseAdmin.rpc("search_documents", {
+    // Sector-based RAG search
+    const searchText = effectiveText || "";
+    const roleTag = searchText ? detectSector(searchText) : null;
+
+    let contextChunks: any[] = [];
+    if (searchText) {
+      const { data: results } = await supabaseAdmin.rpc("search_documents", {
         p_client_id: clientId,
-        p_query: messageText,
+        p_query: searchText,
         p_limit: 3,
+        p_role_tag: roleTag,
       });
-      contextChunks = globalResults || [];
+      contextChunks = results || [];
+
+      // Fallback: retry without role_tag
+      if (contextChunks.length === 0 && roleTag !== null) {
+        const { data: globalResults } = await supabaseAdmin.rpc("search_documents", {
+          p_client_id: clientId,
+          p_query: searchText,
+          p_limit: 3,
+        });
+        contextChunks = globalResults || [];
+      }
     }
 
-    // Fallback 2: If still empty, fetch latest documents directly
+    // Fallback: fetch latest documents directly
     if (contextChunks.length === 0) {
       const { data: fallback } = await supabaseAdmin
         .from("documents")
@@ -298,7 +408,6 @@ serve(async (req) => {
       contextChunks = fallback || [];
     }
 
-    // If no documents at all, escalate to human
     if (contextChunks.length === 0) {
       await escalateToHuman(supabaseAdmin, conversation!.id, phoneNumber, instanceName);
       return new Response(
@@ -312,11 +421,9 @@ serve(async (req) => {
       .filter(Boolean)
       .join("\n\n---\n\n");
 
-    // Call Lovable AI
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
-    // Build system prompt from platform_settings or default
     const rawPrompt = cfg.ai_system_prompt
       ? cfg.ai_system_prompt.replace(/^"|"$/g, "")
       : `Kamu adalah asisten customer service yang ramah dan profesional. Jawab pertanyaan berdasarkan konteks yang diberikan. Jika kamu tidak tahu jawabannya atau pelanggan meminta berbicara dengan manusia, balas HANYA dengan kata ESKALASI_HUMAN.`;
@@ -330,6 +437,7 @@ serve(async (req) => {
     const aiTemperature = parseFloat(cfg.ai_temperature || "0.3");
     const aiMaxTokens = parseInt(cfg.ai_max_tokens || "1024");
 
+    // Build AI request with context memory (history) instead of single message
     const aiResponse = await fetch(
       "https://ai.gateway.lovable.dev/v1/chat/completions",
       {
@@ -342,7 +450,7 @@ serve(async (req) => {
           model: aiModel,
           messages: [
             { role: "system", content: systemPrompt },
-            { role: "user", content: messageText },
+            ...historyMessages,
           ],
           temperature: aiTemperature,
           max_tokens: aiMaxTokens,
@@ -386,7 +494,6 @@ serve(async (req) => {
       });
     }
 
-    // Decrease quota
     if (clientData && clientData.quota_remaining > 0) {
       await supabaseAdmin
         .from("clients")
@@ -394,7 +501,6 @@ serve(async (req) => {
         .eq("id", clientId);
     }
 
-    // Check for escalation
     if (answer.includes("ESKALASI_HUMAN")) {
       await escalateToHuman(supabaseAdmin, conversation!.id, phoneNumber, instanceName);
       return new Response(
@@ -403,10 +509,8 @@ serve(async (req) => {
       );
     }
 
-    // Send AI reply via Evolution API
     await sendWhatsAppMessage(phoneNumber, answer, instanceName);
 
-    // Save AI message
     await supabaseAdmin.from("wa_messages").insert({
       conversation_id: conversation!.id,
       sender: "AI",
@@ -426,20 +530,15 @@ serve(async (req) => {
   }
 });
 
-/**
- * Send WhatsApp message via Evolution API with typing indicator + delay
- */
 async function sendWhatsAppMessage(phoneNumber: string, message: string, instanceName: string) {
   const EVOLUTION_API_URL = Deno.env.get("EVOLUTION_API_URL")!;
   const EVOLUTION_API_KEY = Deno.env.get("EVOLUTION_API_KEY")!;
   const baseUrl = EVOLUTION_API_URL.replace(/\/$/, "");
   const normalizedPhone = phoneNumber.replace(/\D/g, "");
 
-  // Read delay config from platform_settings if available
   const delayMin = 2000;
   const delayMax = 4000;
 
-  // Typing indicator
   try {
     await fetch(`${baseUrl}/chat/presence/${instanceName}`, {
       method: "POST",
@@ -450,10 +549,8 @@ async function sendWhatsAppMessage(phoneNumber: string, message: string, instanc
     console.warn("Typing indicator failed:", e);
   }
 
-  // Delay 2-4 seconds
   await new Promise((r) => setTimeout(r, delayMin + Math.random() * (delayMax - delayMin)));
 
-  // Send message
   const res = await fetch(`${baseUrl}/message/sendText/${instanceName}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
@@ -466,26 +563,20 @@ async function sendWhatsAppMessage(phoneNumber: string, message: string, instanc
   }
 }
 
-/**
- * Escalate conversation to HUMAN
- */
 async function escalateToHuman(
   supabase: any,
   conversationId: string,
   phoneNumber: string,
   instanceName: string
 ) {
-  // Update conversation to HUMAN
   await supabase
     .from("wa_conversations")
     .update({ handled_by: "HUMAN", updated_at: new Date().toISOString() })
     .eq("id", conversationId);
 
-  // Send escalation message to user
   const escalationMsg = "Mohon tunggu kak, saya sedang menyambungkan dengan Admin kami. 🙏";
   await sendWhatsAppMessage(phoneNumber, escalationMsg, instanceName);
 
-  // Save escalation message
   await supabase.from("wa_messages").insert({
     conversation_id: conversationId,
     sender: "AI",

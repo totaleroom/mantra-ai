@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Bot, User, Send, Loader2, ArrowRightLeft, ShieldCheck } from "lucide-react";
+import { Bot, User, Send, Loader2, ArrowRightLeft, ShieldCheck, ImageIcon } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
@@ -13,6 +13,8 @@ interface Message {
   sender: string;
   content: string;
   created_at: string;
+  media_url?: string | null;
+  media_type?: string | null;
 }
 
 interface InboxChatProps {
@@ -42,7 +44,7 @@ export default function InboxChat({
     setLoading(true);
     const { data } = await supabase
       .from("wa_messages" as any)
-      .select("id, sender, content, created_at")
+      .select("id, sender, content, created_at, media_url, media_type")
       .eq("conversation_id", conversationId)
       .order("created_at", { ascending: true });
     setMessages((data as any[] || []) as Message[]);
@@ -215,7 +217,29 @@ export default function InboxChat({
                           : "bg-green-500/10 text-foreground rounded-tr-none"
                     )}
                   >
-                    <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                    {/* Media image */}
+                    {msg.media_url && msg.media_type === "image" && (
+                      <div className="mb-2">
+                        <img
+                          src={msg.media_url}
+                          alt="Media"
+                          className="max-w-full max-h-60 rounded-md object-cover cursor-pointer"
+                          onClick={() => window.open(msg.media_url!, "_blank")}
+                          loading="lazy"
+                        />
+                      </div>
+                    )}
+                    {/* Media placeholder for non-image */}
+                    {msg.media_url && msg.media_type && msg.media_type !== "image" && (
+                      <div className="mb-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <ImageIcon className="h-3.5 w-3.5" />
+                        <span>Media ({msg.media_type})</span>
+                      </div>
+                    )}
+                    {/* Text content - hide if it's just "[Gambar]" placeholder */}
+                    {msg.content && msg.content !== "[Gambar]" && (
+                      <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                    )}
                   </div>
                   {/* Timestamp */}
                   <p className="text-[10px] text-muted-foreground mt-0.5">
