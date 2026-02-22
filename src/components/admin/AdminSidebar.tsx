@@ -1,6 +1,8 @@
-import { Users, Smartphone, BookOpen, BarChart3, LogOut, MessageSquare, Settings } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Users, Smartphone, BookOpen, BarChart3, LogOut, MessageSquare, Settings, LayoutDashboard } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useAuth } from "@/hooks/useAuth";
+import { supabase } from "@/integrations/supabase/client";
 import logoHorizontal from "@/assets/logo_mantra_horizontal.png";
 import {
   Sidebar,
@@ -15,8 +17,9 @@ import {
 import { Button } from "@/components/ui/button";
 
 const navItems = [
+  { title: "Dashboard", url: "/admin", icon: LayoutDashboard, exact: true },
   { title: "Clients", url: "/admin/clients", icon: Users },
-  { title: "Inbox", url: "/admin/inbox", icon: MessageSquare },
+  { title: "Inbox", url: "/admin/inbox", icon: MessageSquare, badgeKey: "inbox" },
   { title: "Device & Connection", url: "/admin/devices", icon: Smartphone },
   { title: "Knowledge Base", url: "/admin/knowledge", icon: BookOpen },
   { title: "Monitoring", url: "/admin/monitoring", icon: BarChart3 },
@@ -25,6 +28,33 @@ const navItems = [
 
 export default function AdminSidebar() {
   const { signOut } = useAuth();
+  const [humanCount, setHumanCount] = useState(0);
+
+  const fetchHumanCount = async () => {
+    const { count } = await supabase
+      .from("wa_conversations" as any)
+      .select("id", { count: "exact", head: true })
+      .eq("handled_by", "HUMAN")
+      .eq("status", "active");
+    setHumanCount(count || 0);
+  };
+
+  useEffect(() => {
+    fetchHumanCount();
+
+    const channel = supabase
+      .channel("sidebar-escalation")
+      .on("postgres_changes", {
+        event: "*",
+        schema: "public",
+        table: "wa_conversations",
+      }, () => {
+        fetchHumanCount();
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, []);
 
   return (
     <Sidebar>
@@ -41,11 +71,17 @@ export default function AdminSidebar() {
                   <SidebarMenuButton asChild>
                     <NavLink
                       to={item.url}
+                      end={item.exact}
                       className="hover:bg-sidebar-accent"
                       activeClassName="bg-sidebar-accent text-sidebar-accent-foreground font-medium"
                     >
                       <item.icon className="mr-2 h-4 w-4" />
-                      <span>{item.title}</span>
+                      <span className="flex-1">{item.title}</span>
+                      {item.badgeKey === "inbox" && humanCount > 0 && (
+                        <span className="ml-auto flex h-5 min-w-[20px] items-center justify-center rounded-full bg-destructive text-destructive-foreground text-[10px] font-bold animate-pulse">
+                          {humanCount}
+                        </span>
+                      )}
                     </NavLink>
                   </SidebarMenuButton>
                 </SidebarMenuItem>

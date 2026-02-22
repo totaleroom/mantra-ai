@@ -7,22 +7,38 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from "@/components/ui/table";
-import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Upload, FileText, Trash2, Loader2, Send } from "lucide-react";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Upload, FileText, Trash2, Loader2, Send, Tag } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 interface Client { id: string; name: string; }
-interface Document { id: string; file_name: string; status: string; created_at: string; chunk_index: number; role_tag: string | null; }
+interface Document {
+  id: string;
+  file_name: string;
+  status: string;
+  created_at: string;
+  chunk_index: number;
+  role_tag: string | null;
+  client_id: string;
+  client_name?: string;
+}
+
+const roleTagColors: Record<string, string> = {
+  admin: "bg-blue-500/15 text-blue-700 border-blue-500/30",
+  warehouse: "bg-amber-500/15 text-amber-700 border-amber-500/30",
+  owner: "bg-purple-500/15 text-purple-700 border-purple-500/30",
+};
 
 export default function KnowledgeBase() {
   const [clients, setClients] = useState<Client[]>([]);
-  const [selectedClientId, setSelectedClientId] = useState("");
+  const [filterClientId, setFilterClientId] = useState("all");
+  const [uploadClientId, setUploadClientId] = useState("");
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -40,22 +56,34 @@ export default function KnowledgeBase() {
   }, []);
 
   const fetchDocuments = async () => {
-    if (!selectedClientId) return;
     setLoading(true);
-    const { data } = await supabase
+    let query = supabase
       .from("documents" as any)
-      .select("id, file_name, status, created_at, chunk_index, role_tag")
-      .eq("client_id", selectedClientId)
+      .select("id, file_name, status, created_at, chunk_index, role_tag, client_id")
       .eq("chunk_index", 0)
       .order("created_at", { ascending: false });
-    setDocuments((data as any[] || []) as Document[]);
+
+    if (filterClientId !== "all") {
+      query = query.eq("client_id", filterClientId);
+    }
+
+    const { data } = await query;
+    const clientMap = new Map(clients.map((c) => [c.id, c.name]));
+    const docs = ((data as any[]) || []).map((d: any) => ({
+      ...d,
+      client_name: clientMap.get(d.client_id) || "Unknown",
+    }));
+    setDocuments(docs as Document[]);
     setLoading(false);
   };
 
-  useEffect(() => { fetchDocuments(); }, [selectedClientId]);
+  useEffect(() => { fetchDocuments(); }, [filterClientId, clients]);
 
   const handleUpload = async (files: FileList | null) => {
-    if (!files || !selectedClientId) return;
+    if (!files || !uploadClientId) {
+      if (!uploadClientId) toast({ variant: "destructive", title: "Pilih target client dulu" });
+      return;
+    }
     setUploading(true);
     for (const file of Array.from(files)) {
       const ext = file.name.split(".").pop()?.toLowerCase();
@@ -63,22 +91,21 @@ export default function KnowledgeBase() {
         toast({ variant: "destructive", title: "Format tidak didukung", description: `${file.name} - hanya PDF dan TXT.` });
         continue;
       }
-      const path = `${selectedClientId}/${Date.now()}_${file.name}`;
+      const path = `${uploadClientId}/${Date.now()}_${file.name}`;
       const { error: uploadError } = await supabase.storage.from("knowledge").upload(path, file);
       if (uploadError) {
         toast({ variant: "destructive", title: "Upload gagal", description: uploadError.message });
         continue;
       }
       const insertData: any = {
-        client_id: selectedClientId,
+        client_id: uploadClientId,
         file_name: file.name,
         file_path: path,
         status: "processing",
       };
       if (uploadRoleTag) insertData.role_tag = uploadRoleTag;
       const { data: docData } = await (supabase.from("documents" as any).insert(insertData) as any).select("id").single();
-      
-      // Trigger process-document edge function
+
       if (docData?.id) {
         supabase.functions.invoke("process-document", {
           body: { document_id: docData.id },
@@ -99,13 +126,23 @@ export default function KnowledgeBase() {
     fetchDocuments();
   };
 
+  const handleUpdateRoleTag = async (doc: Document, newTag: string | null) => {
+    await supabase.from("documents" as any).update({ role_tag: newTag } as any).eq("id", doc.id);
+    toast({ title: "Role tag diperbarui" });
+    fetchDocuments();
+  };
+
   const handleTestChat = async () => {
-    if (!chatInput.trim() || !selectedClientId) return;
+    const targetClient = filterClientId !== "all" ? filterClientId : uploadClientId;
+    if (!chatInput.trim() || !targetClient) {
+      if (!targetClient) toast({ variant: "destructive", title: "Pilih client dulu" });
+      return;
+    }
     setChatLoading(true);
     setChatResponse("");
     try {
       const { data, error } = await supabase.functions.invoke("test-rag", {
-        body: { client_id: selectedClientId, question: chatInput },
+        body: { client_id: targetClient, question: chatInput },
       });
       if (error) throw error;
       setChatResponse(data?.answer || "Tidak ada jawaban.");
@@ -118,148 +155,165 @@ export default function KnowledgeBase() {
 
   const statusBadge = (status: string) => {
     switch (status) {
-      case "ready": return <Badge className="bg-green-500/20 text-green-700 border-green-500/30">Ready</Badge>;
-      case "processing": return <Badge className="bg-yellow-500/20 text-yellow-700 border-yellow-500/30">Processing</Badge>;
-      default: return <Badge className="bg-red-500/20 text-red-700 border-red-500/30">Error</Badge>;
+      case "ready": return <Badge className="bg-green-500/20 text-green-700 border-green-500/30 text-[10px]">Ready</Badge>;
+      case "processing": return <Badge className="bg-yellow-500/20 text-yellow-700 border-yellow-500/30 text-[10px]">Processing</Badge>;
+      default: return <Badge className="bg-red-500/20 text-red-700 border-red-500/30 text-[10px]">Error</Badge>;
     }
   };
 
   return (
-    <div>
-      <h1 className="mb-6 text-2xl font-bold text-foreground">Knowledge Base</h1>
+    <div className="space-y-6">
+      <h1 className="text-2xl font-bold text-foreground">Knowledge Base</h1>
 
-      <div className="mb-6 max-w-sm">
-        <Select value={selectedClientId} onValueChange={setSelectedClientId}>
-          <SelectTrigger><SelectValue placeholder="Pilih Client..." /></SelectTrigger>
+      {/* Upload Zone */}
+      <div
+        className={`rounded-lg border-2 border-dashed p-6 text-center transition-colors ${
+          dragOver ? "border-primary bg-primary/5" : "border-border"
+        }`}
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => { e.preventDefault(); setDragOver(false); handleUpload(e.dataTransfer.files); }}
+      >
+        <Upload className="mx-auto mb-2 h-6 w-6 text-muted-foreground" />
+        <p className="mb-3 text-xs text-muted-foreground">Drag & drop PDF/TXT di sini</p>
+        <div className="flex flex-wrap justify-center gap-2 mb-3">
+          <Select value={uploadClientId} onValueChange={setUploadClientId}>
+            <SelectTrigger className="w-48 h-8 text-xs">
+              <SelectValue placeholder="Target Client" />
+            </SelectTrigger>
+            <SelectContent>
+              {clients.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Select value={uploadRoleTag} onValueChange={setUploadRoleTag}>
+            <SelectTrigger className="w-40 h-8 text-xs">
+              <SelectValue placeholder="Role Tag (opsional)" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="">Semua Role</SelectItem>
+              <SelectItem value="admin">Admin</SelectItem>
+              <SelectItem value="warehouse">Warehouse</SelectItem>
+              <SelectItem value="owner">Owner</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <label className="cursor-pointer">
+          <Button variant="outline" size="sm" disabled={uploading} asChild>
+            <span>
+              {uploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Pilih File
+            </span>
+          </Button>
+          <input type="file" accept=".pdf,.txt" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
+        </label>
+      </div>
+
+      {/* Filter */}
+      <div className="flex items-center gap-3">
+        <span className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">Filter Client:</span>
+        <Select value={filterClientId} onValueChange={setFilterClientId}>
+          <SelectTrigger className="w-48 h-8 text-xs">
+            <SelectValue placeholder="Semua Client" />
+          </SelectTrigger>
           <SelectContent>
+            <SelectItem value="all">Semua Client</SelectItem>
             {clients.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
           </SelectContent>
         </Select>
       </div>
 
-      {!selectedClientId && <p className="text-muted-foreground">Pilih client untuk mengelola knowledge base.</p>}
-
-      {selectedClientId && (
-        <div className="space-y-6">
-          {/* Upload Zone */}
-          <div
-            className={`rounded-lg border-2 border-dashed p-8 text-center transition-colors ${
-              dragOver ? "border-primary bg-primary/5" : "border-border"
-            }`}
-            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={(e) => { e.preventDefault(); setDragOver(false); handleUpload(e.dataTransfer.files); }}
-          >
-            <Upload className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
-            <p className="mb-2 text-sm text-muted-foreground">Drag & drop PDF/TXT di sini</p>
-            <div className="mb-3 flex justify-center">
-              <Select value={uploadRoleTag} onValueChange={setUploadRoleTag}>
-                <SelectTrigger className="w-48 h-8 text-xs">
-                  <SelectValue placeholder="Role Tag (opsional)" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="">Semua Role</SelectItem>
-                  <SelectItem value="admin">Admin</SelectItem>
-                  <SelectItem value="warehouse">Warehouse</SelectItem>
-                  <SelectItem value="owner">Owner</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <label className="cursor-pointer">
-              <Button variant="outline" size="sm" disabled={uploading} asChild>
-                <span>
-                  {uploading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                  Pilih File
-                </span>
-              </Button>
-              <input type="file" accept=".pdf,.txt" multiple className="hidden" onChange={(e) => handleUpload(e.target.files)} />
-            </label>
-          </div>
-
-          {/* Documents List */}
-          {loading ? (
-            <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
-          ) : (
-            <div className="rounded-lg border border-border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                     <TableHead>File</TableHead>
-                     <TableHead>Role</TableHead>
-                     <TableHead>Status</TableHead>
-                     <TableHead>Tanggal</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {documents.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={5} className="text-center text-muted-foreground py-8">Belum ada dokumen</TableCell>
-                    </TableRow>
-                  ) : (
-                    documents.map((doc) => (
-                      <TableRow key={doc.id}>
-                        <TableCell className="flex items-center gap-2">
-                          <FileText className="h-4 w-4 text-muted-foreground" /> {doc.file_name}
-                        </TableCell>
-                        <TableCell>
-                          {doc.role_tag ? (
-                            <Badge variant="outline" className="text-xs">{doc.role_tag}</Badge>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">—</span>
-                          )}
-                        </TableCell>
-                        <TableCell>{statusBadge(doc.status)}</TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {new Date(doc.created_at).toLocaleDateString("id-ID")}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <Button variant="ghost" size="icon" className="text-destructive"><Trash2 className="h-4 w-4" /></Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader>
-                                <AlertDialogTitle>Hapus dokumen?</AlertDialogTitle>
-                                <AlertDialogDescription>File "{doc.file_name}" akan dihapus.</AlertDialogDescription>
-                              </AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel>Batal</AlertDialogCancel>
-                                <AlertDialogAction onClick={() => handleDelete(doc)}>Hapus</AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-
-          {/* Test Chatbox */}
-          <div className="rounded-lg border border-border bg-card p-4">
-            <h3 className="mb-3 text-sm font-semibold text-foreground">Test Bot Response</h3>
-            <div className="flex gap-2">
-              <Input
-                placeholder="Ketik pertanyaan untuk test RAG..."
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleTestChat()}
-              />
-              <Button size="icon" onClick={handleTestChat} disabled={chatLoading}>
-                {chatLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              </Button>
-            </div>
-            {chatResponse && (
-              <div className="mt-3 rounded-md bg-muted p-3 text-sm text-foreground whitespace-pre-wrap">
-                {chatResponse}
+      {/* Document Cards */}
+      {loading ? (
+        <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
+      ) : documents.length === 0 ? (
+        <p className="text-center text-sm text-muted-foreground py-8">Belum ada dokumen</p>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {documents.map((doc) => (
+            <div key={doc.id} className="relative rounded-lg border border-border bg-card p-4 hover:bg-muted/30 transition-colors">
+              {/* Delete */}
+              <div className="absolute top-2 right-2">
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive hover:text-destructive">
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Hapus dokumen?</AlertDialogTitle>
+                      <AlertDialogDescription>File "{doc.file_name}" akan dihapus.</AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Batal</AlertDialogCancel>
+                      <AlertDialogAction onClick={() => handleDelete(doc)}>Hapus</AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
               </div>
-            )}
-          </div>
+
+              {/* Client badge */}
+              <Badge variant="secondary" className="text-[10px] mb-2">{doc.client_name}</Badge>
+
+              {/* File name */}
+              <div className="flex items-center gap-2 mb-2">
+                <FileText className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                <span className="text-sm font-medium text-foreground truncate">{doc.file_name}</span>
+              </div>
+
+              {/* Role tag (inline editable) */}
+              <div className="flex items-center gap-2 mb-2">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button className="flex items-center gap-1 cursor-pointer">
+                      <Tag className="h-3 w-3 text-muted-foreground" />
+                      <Badge
+                        variant="outline"
+                        className={`text-[10px] cursor-pointer ${doc.role_tag ? (roleTagColors[doc.role_tag] || "bg-muted text-muted-foreground") : "bg-muted text-muted-foreground"}`}
+                      >
+                        {doc.role_tag || "No Tag"}
+                      </Badge>
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent>
+                    <DropdownMenuItem onClick={() => handleUpdateRoleTag(doc, null)}>No Tag</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleUpdateRoleTag(doc, "admin")}>Admin</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleUpdateRoleTag(doc, "warehouse")}>Warehouse</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleUpdateRoleTag(doc, "owner")}>Owner</DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                {statusBadge(doc.status)}
+              </div>
+
+              {/* Date */}
+              <p className="text-[10px] text-muted-foreground">
+                {new Date(doc.created_at).toLocaleDateString("id-ID")}
+              </p>
+            </div>
+          ))}
         </div>
       )}
+
+      {/* Test Chatbox */}
+      <div className="rounded-lg border border-border bg-card p-4">
+        <h3 className="mb-3 text-sm font-semibold text-foreground">Test Bot Response</h3>
+        <div className="flex gap-2">
+          <Input
+            placeholder="Ketik pertanyaan untuk test RAG..."
+            value={chatInput}
+            onChange={(e) => setChatInput(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleTestChat()}
+          />
+          <Button size="icon" onClick={handleTestChat} disabled={chatLoading}>
+            {chatLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          </Button>
+        </div>
+        {chatResponse && (
+          <div className="mt-3 rounded-md bg-muted p-3 text-sm text-foreground whitespace-pre-wrap">
+            {chatResponse}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

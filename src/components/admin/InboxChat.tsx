@@ -2,9 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Bot, User, Send, Loader2, ArrowRightLeft } from "lucide-react";
+import { Bot, User, Send, Loader2, ArrowRightLeft, ShieldCheck } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 
@@ -49,11 +49,8 @@ export default function InboxChat({
     setLoading(false);
   };
 
-  useEffect(() => {
-    fetchMessages();
-  }, [conversationId]);
+  useEffect(() => { fetchMessages(); }, [conversationId]);
 
-  // Realtime messages
   useEffect(() => {
     const channel = supabase
       .channel(`chat-${conversationId}`)
@@ -70,7 +67,6 @@ export default function InboxChat({
     return () => { supabase.removeChannel(channel); };
   }, [conversationId]);
 
-  // Auto-scroll
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -81,7 +77,6 @@ export default function InboxChat({
     if (!input.trim() || sending) return;
     setSending(true);
     try {
-      // Get wa_sessions instance for this conversation's client
       const { data: convo } = await supabase
         .from("wa_conversations" as any)
         .select("client_id")
@@ -135,21 +130,21 @@ export default function InboxChat({
     }
   };
 
-  const senderStyle = (sender: string) => {
-    switch (sender) {
-      case "USER": return "bg-muted text-foreground";
-      case "AI": return "bg-primary/10 text-primary border border-primary/20";
-      case "ADMIN": return "bg-green-500/10 text-green-700 border border-green-500/20";
-      default: return "bg-muted text-foreground";
-    }
-  };
-
   const senderLabel = (sender: string) => {
     switch (sender) {
       case "USER": return "Customer";
       case "AI": return "AI Bot";
       case "ADMIN": return "Admin";
       default: return sender;
+    }
+  };
+
+  const senderBadgeClass = (sender: string) => {
+    switch (sender) {
+      case "USER": return "bg-muted text-muted-foreground";
+      case "AI": return "bg-primary/10 text-primary";
+      case "ADMIN": return "bg-green-500/10 text-green-700";
+      default: return "bg-muted text-muted-foreground";
     }
   };
 
@@ -177,12 +172,7 @@ export default function InboxChat({
             {handledBy === "HUMAN" ? <User className="h-3 w-3 mr-1" /> : <Bot className="h-3 w-3 mr-1" />}
             {handledBy}
           </Badge>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleToggle}
-            disabled={toggling}
-          >
+          <Button variant="outline" size="sm" onClick={handleToggle} disabled={toggling}>
             {toggling ? (
               <Loader2 className="h-3 w-3 animate-spin mr-1" />
             ) : (
@@ -202,25 +192,38 @@ export default function InboxChat({
         ) : messages.length === 0 ? (
           <p className="text-center text-sm text-muted-foreground py-8">Belum ada pesan</p>
         ) : (
-          <div className="space-y-3">
-            {messages.map((msg) => (
-              <div
-                key={msg.id}
-                className={cn(
-                  "max-w-[80%] rounded-lg px-3 py-2",
-                  msg.sender === "USER" ? "mr-auto" : "ml-auto",
-                  senderStyle(msg.sender)
-                )}
-              >
-                <p className="text-[10px] font-semibold mb-0.5 opacity-70">
-                  {senderLabel(msg.sender)}
-                </p>
-                <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
-                <p className="text-[10px] opacity-50 mt-1">
-                  {new Date(msg.created_at).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
-                </p>
-              </div>
-            ))}
+          <div className="space-y-4">
+            {messages.map((msg) => {
+              const isUser = msg.sender === "USER";
+              return (
+                <div key={msg.id} className={cn("flex flex-col", isUser ? "items-start" : "items-end")}>
+                  {/* Sender badge */}
+                  <Badge className={cn("text-[9px] px-1.5 py-0 mb-1 font-semibold", senderBadgeClass(msg.sender))}>
+                    {msg.sender === "USER" && <User className="h-2.5 w-2.5 mr-0.5" />}
+                    {msg.sender === "AI" && <Bot className="h-2.5 w-2.5 mr-0.5" />}
+                    {msg.sender === "ADMIN" && <ShieldCheck className="h-2.5 w-2.5 mr-0.5" />}
+                    {senderLabel(msg.sender)}
+                  </Badge>
+                  {/* Bubble */}
+                  <div
+                    className={cn(
+                      "max-w-[80%] rounded-lg px-3 py-2",
+                      isUser
+                        ? "bg-muted text-foreground rounded-tl-none"
+                        : msg.sender === "AI"
+                          ? "bg-primary/10 text-foreground rounded-tr-none"
+                          : "bg-green-500/10 text-foreground rounded-tr-none"
+                    )}
+                  >
+                    <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                  </div>
+                  {/* Timestamp */}
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    {new Date(msg.created_at).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
+                  </p>
+                </div>
+              );
+            })}
           </div>
         )}
       </ScrollArea>
@@ -228,8 +231,8 @@ export default function InboxChat({
       {/* Input */}
       <div className="border-t border-border p-3">
         {handledBy === "HUMAN" ? (
-          <div className="flex gap-2">
-            <Textarea
+          <div className="flex gap-2 items-center">
+            <Input
               placeholder="Ketik balasan..."
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -239,10 +242,9 @@ export default function InboxChat({
                   handleSend();
                 }
               }}
-              className="min-h-[40px] max-h-[120px] resize-none"
-              rows={1}
+              className="rounded-full h-9 text-sm"
             />
-            <Button size="icon" onClick={handleSend} disabled={sending || !input.trim()}>
+            <Button size="icon" className="rounded-full h-9 w-9" onClick={handleSend} disabled={sending || !input.trim()}>
               {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
             </Button>
           </div>
