@@ -13,6 +13,7 @@ import DeviceManager from "./pages/admin/DeviceManager";
 import KnowledgeBase from "./pages/admin/KnowledgeBase";
 import Monitoring from "./pages/admin/Monitoring";
 import Inbox from "./pages/admin/Inbox";
+import Settings from "./pages/admin/Settings";
 
 const queryClient = new QueryClient();
 
@@ -39,6 +40,7 @@ const App = () => (
             <Route path="knowledge" element={<KnowledgeBase />} />
             <Route path="monitoring" element={<Monitoring />} />
             <Route path="inbox" element={<Inbox />} />
+            <Route path="settings" element={<Settings />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>

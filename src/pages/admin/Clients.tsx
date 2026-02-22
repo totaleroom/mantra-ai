@@ -39,7 +39,10 @@ export default function Clients() {
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
-  const [form, setForm] = useState({ name: "", industry: "", subscription_plan: "basic" });
+  const [form, setForm] = useState({
+    name: "", industry: "", subscription_plan: "basic",
+    quota_limit: 1000, quota_remaining: 1000, daily_message_limit: 300, status: "active",
+  });
   const [submitting, setSubmitting] = useState(false);
   const { toast } = useToast();
 
@@ -91,20 +94,28 @@ export default function Clients() {
       if (editingClient) {
         const { error } = await supabase
           .from("clients" as any)
-          .update({ name: form.name, industry: form.industry || null, subscription_plan: form.subscription_plan } as any)
+          .update({
+            name: form.name, industry: form.industry || null, subscription_plan: form.subscription_plan,
+            quota_limit: form.quota_limit, quota_remaining: form.quota_remaining,
+            daily_message_limit: form.daily_message_limit, status: form.status,
+          } as any)
           .eq("id", editingClient.id);
         if (error) throw error;
         toast({ title: "Client diperbarui" });
       } else {
         const { error } = await supabase
           .from("clients" as any)
-          .insert({ name: form.name, industry: form.industry || null, subscription_plan: form.subscription_plan } as any);
+          .insert({
+            name: form.name, industry: form.industry || null, subscription_plan: form.subscription_plan,
+            quota_limit: form.quota_limit, quota_remaining: form.quota_remaining,
+            daily_message_limit: form.daily_message_limit, status: form.status,
+          } as any);
         if (error) throw error;
         toast({ title: "Client ditambahkan" });
       }
       setDialogOpen(false);
       setEditingClient(null);
-      setForm({ name: "", industry: "", subscription_plan: "basic" });
+      setForm({ name: "", industry: "", subscription_plan: "basic", quota_limit: 1000, quota_remaining: 1000, daily_message_limit: 300, status: "active" });
       fetchClients();
     } catch (err: any) {
       toast({ variant: "destructive", title: "Error", description: err.message });
@@ -125,13 +136,17 @@ export default function Clients() {
 
   const openEdit = (client: Client) => {
     setEditingClient(client);
-    setForm({ name: client.name, industry: client.industry || "", subscription_plan: client.subscription_plan });
+    setForm({
+      name: client.name, industry: client.industry || "", subscription_plan: client.subscription_plan,
+      quota_limit: client.quota_limit, quota_remaining: client.quota_remaining,
+      daily_message_limit: (client as any).daily_message_limit || 300, status: client.status,
+    });
     setDialogOpen(true);
   };
 
   const openAdd = () => {
     setEditingClient(null);
-    setForm({ name: "", industry: "", subscription_plan: "basic" });
+    setForm({ name: "", industry: "", subscription_plan: "basic", quota_limit: 1000, quota_remaining: 1000, daily_message_limit: 300, status: "active" });
     setDialogOpen(true);
   };
 
@@ -172,6 +187,30 @@ export default function Clients() {
                     <SelectItem value="basic">Basic</SelectItem>
                     <SelectItem value="pro">Pro</SelectItem>
                     <SelectItem value="enterprise">Enterprise</SelectItem>
+                  </SelectContent>
+              </Select>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Quota Limit</Label>
+                  <Input type="number" value={form.quota_limit} onChange={(e) => setForm({ ...form, quota_limit: parseInt(e.target.value) || 0 })} />
+                </div>
+                <div className="space-y-2">
+                  <Label>Quota Remaining</Label>
+                  <Input type="number" value={form.quota_remaining} onChange={(e) => setForm({ ...form, quota_remaining: parseInt(e.target.value) || 0 })} />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Daily Message Limit</Label>
+                <Input type="number" value={form.daily_message_limit} onChange={(e) => setForm({ ...form, daily_message_limit: parseInt(e.target.value) || 0 })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Status</Label>
+                <Select value={form.status} onValueChange={(v) => setForm({ ...form, status: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="inactive">Inactive</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
