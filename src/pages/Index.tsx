@@ -27,9 +27,9 @@ const Index = () => {
         <ROICalculator />
         <HowItWorks />
         <Testimonials />
+        <About />
         <Pricing />
         <PaymentScheme />
-        <About />
         <FAQ />
         <FinalCTA />
       </main>

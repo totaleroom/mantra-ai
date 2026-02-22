@@ -30,8 +30,8 @@ const testimonials = [
     business: "Fashion Hijab",
     city: "Bandung",
     initial: "F",
-    quote: "Konten marketing saya sekarang konsisten setiap hari. SUARA bantu bikin caption dan deskripsi produk yang menarik.",
-    metric: "Konten 7x/minggu",
+    quote: "Dulu customer chat malam jam 11 pasti besok baru dibalas. Sekarang MANTRA langsung handle, conversion rate naik drastis karena fast response.",
+    metric: "Response < 5 detik",
   },
 ];
 
