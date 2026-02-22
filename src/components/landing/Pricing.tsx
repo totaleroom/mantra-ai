@@ -145,7 +145,7 @@ const Pricing = () => {
                   variant={plan.popular ? "default" : "outline"}
                   asChild
                 >
-                  <a href="https://wa.me/6281234567890" target="_blank" rel="noopener noreferrer">
+                  <a href="https://wa.me/6282125086328" target="_blank" rel="noopener noreferrer">
                     {plan.price.monthly > 0 ? "Mulai Sekarang" : "Hubungi Kami"}
                     <ArrowRight size={16} />
                   </a>

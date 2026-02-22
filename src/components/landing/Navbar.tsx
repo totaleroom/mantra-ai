@@ -19,7 +19,7 @@ const Navbar = () => {
       <div className="container mx-auto flex h-16 items-center justify-between px-4">
         {/* Logo */}
         <a href="#" className="flex items-center">
-          <img src={logoHorizontal} alt="Mantra AI" className="h-8" width={120} height={32} />
+          <img src={logoHorizontal} alt="Mantra AI" className="h-8 object-contain" width={120} height={32} />
         </a>
 
         {/* Desktop Nav */}
@@ -41,7 +41,7 @@ const Navbar = () => {
             <Link to="/login">Juragan</Link>
           </Button>
           <Button size="sm" asChild>
-            <a href="https://wa.me/6281234567890" target="_blank" rel="noopener noreferrer">
+            <a href="https://wa.me/6282125086328" target="_blank" rel="noopener noreferrer">
               Konsultasi Gratis
             </a>
           </Button>
@@ -72,7 +72,7 @@ const Navbar = () => {
                 <Link to="/login">Juragan</Link>
               </Button>
               <Button size="sm" asChild>
-                <a href="https://wa.me/6281234567890" target="_blank" rel="noopener noreferrer">
+                <a href="https://wa.me/6282125086328" target="_blank" rel="noopener noreferrer">
                   Konsultasi Gratis
                 </a>
               </Button>

@@ -26,7 +26,7 @@ const Hero = () => {
 
             <div className="flex flex-wrap gap-3">
               <Button size="lg" className="gap-2 text-base" asChild>
-                <a href="https://wa.me/6281234567890" target="_blank" rel="noopener noreferrer">
+                <a href="https://wa.me/6282125086328" target="_blank" rel="noopener noreferrer">
                   Konsultasi Gratis 15 Menit
                   <ArrowRight size={18} />
                 </a>

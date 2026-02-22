@@ -33,13 +33,13 @@ const FinalCTA = () => {
 
           <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Button size="lg" className="gap-2 text-base" asChild>
-              <a href="https://wa.me/6281234567890" target="_blank" rel="noopener noreferrer">
+              <a href="https://wa.me/6282125086328" target="_blank" rel="noopener noreferrer">
                 Jadwalkan Konsultasi Gratis
                 <ArrowRight size={18} />
               </a>
             </Button>
             <Button size="lg" variant="outline" className="text-base" asChild>
-              <a href="https://wa.me/6281234567890" target="_blank" rel="noopener noreferrer">
+              <a href="https://wa.me/6282125086328" target="_blank" rel="noopener noreferrer">
                 Chat WhatsApp Langsung
               </a>
             </Button>
