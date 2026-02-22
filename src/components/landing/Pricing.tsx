@@ -77,6 +77,7 @@ const Pricing = () => {
           <span className={`text-sm font-medium ${!yearly ? "text-foreground" : "text-muted-foreground"}`}>Bulanan</span>
           <button
             onClick={() => setYearly(!yearly)}
+            aria-label="Toggle harga tahunan"
             className={`relative h-7 w-12 rounded-full transition-colors ${yearly ? "bg-primary" : "bg-border"}`}
           >
             <span className={`absolute top-0.5 h-6 w-6 rounded-full bg-card shadow transition-transform ${yearly ? "translate-x-5" : "translate-x-0.5"}`} />

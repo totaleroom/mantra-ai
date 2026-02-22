@@ -34,7 +34,7 @@ const ROICalculator = () => {
               <span className="text-sm font-medium text-foreground">Jam dihabiskan untuk admin per hari</span>
               <span className="font-mono text-lg font-bold text-primary">{hoursPerDay[0]} jam</span>
             </div>
-            <Slider value={hoursPerDay} onValueChange={setHoursPerDay} min={1} max={12} step={1} />
+            <Slider value={hoursPerDay} onValueChange={setHoursPerDay} min={1} max={12} step={1} aria-label="Jam dihabiskan untuk admin per hari" />
           </div>
 
           <div className="grid gap-4 sm:grid-cols-2">

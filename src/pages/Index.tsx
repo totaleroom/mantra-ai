@@ -18,19 +18,21 @@ const Index = () => {
   return (
     <div className="min-h-screen">
       <Navbar />
-      <Hero />
-      <ChatDemo />
-      <Problem />
-      <AdminCostCalculator />
-      <Features />
-      <ROICalculator />
-      <HowItWorks />
-      <Testimonials />
-      <Pricing />
-      <PaymentScheme />
-      <About />
-      <FAQ />
-      <FinalCTA />
+      <main>
+        <Hero />
+        <ChatDemo />
+        <Problem />
+        <AdminCostCalculator />
+        <Features />
+        <ROICalculator />
+        <HowItWorks />
+        <Testimonials />
+        <Pricing />
+        <PaymentScheme />
+        <About />
+        <FAQ />
+        <FinalCTA />
+      </main>
       <Footer />
     </div>
   );
