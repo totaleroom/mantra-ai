@@ -1,137 +1,80 @@
 
 
-# Security Fix, Admin Access, Documentation, and Production Readiness Audit
+# Update SEO Verification, Fix ROI Calculator, dan Tambah Demo Chat AI
 
-## 1. Grant Admin Access
+## 1. Update Google & Bing Verification Codes
 
-User `totale.room@gmail.com` sudah terdaftar dengan ID `c5db41e3-33c2-4b62-8fab-4add91ff1235`. Saat ini tabel `user_roles` kosong sehingga tidak ada yang bisa masuk dashboard.
+**File:** `index.html` (line 25-26)
 
-**Aksi:** Insert admin role ke `user_roles`.
+Ganti placeholder dengan kode verifikasi asli:
+- Google: `hcD252UNc4uj-grnqcwwNNNkFK_KUdXDW_L1o6FZDkg`
+- Bing: `A6F0E93C359BCC02A63C6C8823DC5CAF`
 
-```sql
-INSERT INTO user_roles (user_id, role)
-VALUES ('c5db41e3-33c2-4b62-8fab-4add91ff1235', 'admin')
-ON CONFLICT DO NOTHING;
+Juga copy file verifikasi yang di-upload ke folder `public/`:
+- `google284e90c4dc0d5a61.html`
+- `BingSiteAuth_2.xml`
+
+---
+
+## 2. Fix ROI Calculator — Text Tumpang Tindih
+
+**File:** `src/components/landing/ROICalculator.tsx`
+
+Masalah: Grid 4 kolom (`lg:grid-cols-4`) menyebabkan text value (terutama format Rupiah panjang seperti "Rp4.850.000") overflow di layar kecil/medium.
+
+Perbaikan:
+- Ubah grid menjadi `sm:grid-cols-2` saja (hapus `lg:grid-cols-4`) agar setiap card lebih lega
+- Kurangi font size value dari `text-2xl` ke `text-xl` agar angka Rupiah tidak overflow
+- Tambahkan `break-all` atau `truncate` sebagai safety net
+
+---
+
+## 3. Tambah Demo Chat AI (Komponen Baru)
+
+**File baru:** `src/components/landing/ChatDemo.tsx`
+
+Komponen animasi chat WhatsApp-style yang menampilkan percakapan antara konsumen dan AI MANTRA (yang dikira admin manusia) untuk bisnis kue/cake.
+
+### Skenario Percakapan F&B (Kue/Bolu):
+
+| # | Pengirim | Pesan |
+|---|----------|-------|
+| 1 | Konsumen | "Halo kak, mau tanya dong. Ada bolu pandan ga?" |
+| 2 | AI (MANTRA) | "Halo kak! Ada dong, Bolu Pandan Keju kami lagi best seller. Mau ukuran yang mana kak? Mini (15cm) Rp45.000 atau Regular (22cm) Rp85.000?" |
+| 3 | Konsumen | "Wah murah ya! Regular aja kak. Bisa kirim ke Cilandak ga?" |
+| 4 | AI (MANTRA) | "Bisa banget kak! Ongkir ke Cilandak Rp15.000. Totalnya Rp100.000 ya. Mau dikirim kapan kak?" |
+| 5 | Konsumen | "Besok siang bisa kak? Sekitar jam 12" |
+| 6 | AI (MANTRA) | "Siap kak, besok siang jam 12 ya. Ini rekap ordernya: Bolu Pandan Keju Regular (22cm) — Rp85.000, Ongkir Cilandak — Rp15.000. Total: Rp100.000. Pembayaran bisa transfer ke BCA 1234567890 a.n. Dapur Bunda Ani. Konfirmasi setelah transfer ya kak!" |
+| 7 | Konsumen | "Udah transfer kak, ini buktinya" |
+| 8 | AI (MANTRA) | "Terima kasih kak! Pembayaran sudah kami terima. Pesanan sedang diproses dan akan dikirim besok jam 12. Kakak akan dapat notifikasi pas kurir berangkat ya. Terima kasih sudah order di Dapur Bunda Ani!" |
+
+### Fitur Animasi:
+- Chat bubbles muncul satu per satu dengan delay (typing indicator "..." sebelum pesan AI muncul)
+- Styling mirip WhatsApp (bubble hijau untuk konsumen, putih untuk AI)
+- Auto-scroll ke bawah saat pesan baru muncul
+- Label kecil di atas: "Konsumen pikir ini admin manusia... padahal ini MANTRA AI"
+- Tombol "Putar Ulang" untuk restart animasi
+- Di bawah demo: badge kecil "Semua dijawab otomatis oleh MANTRA AI dalam hitungan detik"
+
+### Posisi di Landing Page:
+
+**File:** `src/pages/Index.tsx`
+
+Ditempatkan tepat setelah Hero dan sebelum Problem:
+```
+Hero -> ChatDemo -> Problem -> ...
 ```
 
 ---
 
-## 2. Fix Security Issues (6 Findings)
+## Ringkasan Perubahan
 
-Security scan menemukan bahwa semua 6 tabel bisa diakses oleh role `anon` karena policy tidak membatasi ke `authenticated` saja. Meskipun `is_admin()` sudah mengembalikan `false` untuk anon, best practice adalah secara eksplisit membatasi policy hanya ke `authenticated`.
-
-**Aksi:** Drop semua policy lama, buat ulang dengan `TO authenticated`:
-
-| Tabel | Policy Baru |
-|-------|------------|
-| `clients` | `FOR ALL TO authenticated USING (is_admin()) WITH CHECK (is_admin())` |
-| `documents` | Same pattern |
-| `wa_sessions` | Same pattern |
-| `message_logs` | Same pattern |
-| `billing_alerts` | Same pattern |
-| `user_roles` | `FOR ALL TO authenticated USING (has_role(auth.uid(), 'admin')) WITH CHECK (has_role(auth.uid(), 'admin'))` |
-
-Migration SQL:
-
-```sql
--- clients
-DROP POLICY IF EXISTS "Admins can manage clients" ON clients;
-CREATE POLICY "Admins can manage clients" ON clients
-  FOR ALL TO authenticated USING (is_admin()) WITH CHECK (is_admin());
-
--- documents
-DROP POLICY IF EXISTS "Admins can manage documents" ON documents;
-CREATE POLICY "Admins can manage documents" ON documents
-  FOR ALL TO authenticated USING (is_admin()) WITH CHECK (is_admin());
-
--- wa_sessions
-DROP POLICY IF EXISTS "Admins can manage wa_sessions" ON wa_sessions;
-CREATE POLICY "Admins can manage wa_sessions" ON wa_sessions
-  FOR ALL TO authenticated USING (is_admin()) WITH CHECK (is_admin());
-
--- message_logs
-DROP POLICY IF EXISTS "Admins can manage message_logs" ON message_logs;
-CREATE POLICY "Admins can manage message_logs" ON message_logs
-  FOR ALL TO authenticated USING (is_admin()) WITH CHECK (is_admin());
-
--- billing_alerts
-DROP POLICY IF EXISTS "Admins can manage billing_alerts" ON billing_alerts;
-CREATE POLICY "Admins can manage billing_alerts" ON billing_alerts
-  FOR ALL TO authenticated USING (is_admin()) WITH CHECK (is_admin());
-
--- user_roles
-DROP POLICY IF EXISTS "Admins can manage user_roles" ON user_roles;
-CREATE POLICY "Admins can manage user_roles" ON user_roles
-  FOR ALL TO authenticated
-  USING (has_role(auth.uid(), 'admin'::app_role))
-  WITH CHECK (has_role(auth.uid(), 'admin'::app_role));
-```
-
-Ini akan menyelesaikan semua 6 security findings sekaligus.
-
----
-
-## 3. Documentation (README.md)
-
-README.md akan diperbarui dengan panduan lengkap penggunaan platform:
-
-### Konten yang ditambahkan:
-- **Panduan Penggunaan Platform** (untuk non-teknis):
-  - Cara login sebagai admin
-  - Cara mengelola client (add, edit, delete)
-  - Cara menghubungkan WhatsApp device (scan QR)
-  - Cara upload knowledge base (PDF/TXT)
-  - Cara test bot response (RAG)
-  - Cara monitoring pesan dan billing alerts
-- **Arsitektur Teknis** (sudah ada, dipertahankan)
-- **Panduan VPS Deployment** (sudah ada, dipertahankan)
-- **Environment Variables** yang diperlukan
-- **Fitur-fitur utama** beserta penjelasan
-
----
-
-## 4. Production Readiness Assessment
-
-### Yang Sudah Siap:
-- Authentication flow (login, register, email verification)
-- Role-based access control (admin only dashboard)
-- Anti-bot honeypot pada login form
-- RLS policies pada semua tabel (setelah fix di step 2)
-- SEO lengkap (meta tags, JSON-LD, robots.txt, sitemap.xml)
-- Privacy policy dialog
-- Footer dengan kontak lengkap
-- WhatsApp CTA links benar (082125086328)
-- Error handling dan loading states di semua halaman admin
-- Responsive design (mobile, tablet, desktop)
-
-### Yang Perlu Diperhatikan (tapi bukan blocker):
-- **Google/Bing verification codes** masih placeholder di `index.html` -- perlu diganti setelah mendaftar di Google Search Console dan Bing Webmaster
-- **Edge function `test-rag`** dipanggil di Knowledge Base tapi belum ada -- fitur Test Bot akan error (non-blocking, fitur opsional)
-- **Password leaked protection** disabled di backend auth settings (warning level, bukan critical)
-
-### Tidak Ada Bug Kritis:
-- Semua tombol dashboard berfungsi dengan handler yang benar
-- Form validation menggunakan Zod
-- Loading states di semua operasi async
-- Error toast notifications untuk semua kegagalan
-
----
-
-## 5. Post-Implementation Verification
-
-Setelah implementasi, akan dilakukan:
-1. Navigate ke `/login` -- verifikasi halaman render
-2. Navigate ke `/admin/clients` -- verifikasi dashboard terbuka (setelah admin role di-insert)
-3. Cek console logs untuk error
-4. Verifikasi security scan bersih
-
----
-
-## Daftar File yang Diubah
-
-| File | Perubahan |
-|------|-----------|
-| Database migration | RLS policies tightened (`TO authenticated` + `WITH CHECK`) |
-| Database insert | Admin role untuk `c5db41e3-...` |
-| `README.md` | Dokumentasi penggunaan platform lengkap |
+| File | Aksi |
+|------|------|
+| `index.html` | Update meta verification codes |
+| `public/google284e90c4dc0d5a61.html` | Copy dari upload |
+| `public/BingSiteAuth_2.xml` | Copy dari upload |
+| `src/components/landing/ROICalculator.tsx` | Fix grid/font agar tidak tumpang tindih |
+| `src/components/landing/ChatDemo.tsx` | Komponen baru — animasi demo chat |
+| `src/pages/Index.tsx` | Tambah ChatDemo setelah Hero |
 
