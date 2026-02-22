@@ -8,6 +8,38 @@ const corsHeaders = {
 };
 
 /**
+ * Detect sector/role_tag from message keywords for targeted RAG search.
+ * Returns 'WAREHOUSE', 'OWNER', or null (fallback to all documents).
+ */
+function detectSector(message: string): string | null {
+  const lower = message.toLowerCase();
+
+  const warehouseKeywords = [
+    'stok', 'sisa', 'habis', 'gudang', 'bahan baku', 'expired',
+    'pengiriman', 'ekspedisi', 'resi', 'packing', 'bikin', 'proses',
+    'antri', 'slot', 'jadwal', 'booking', 'penuh', 'unit', 'available',
+  ];
+
+  const ownerKeywords = [
+    'harga', 'diskon', 'discount', 'promo', 'voucher', 'cod',
+    'bayar', 'transfer', 'policy', 'kebijakan', 'refund', 'retur',
+    'komplain', 'owner', 'bos', 'cicilan', 'kpr', 'dp', 'nego',
+  ];
+
+  for (const kw of warehouseKeywords) {
+    if (kw.includes(' ') ? lower.includes(kw) : new RegExp(`\\b${kw}\\b`).test(lower)) {
+      return 'WAREHOUSE';
+    }
+  }
+  for (const kw of ownerKeywords) {
+    if (new RegExp(`\\b${kw}\\b`).test(lower)) {
+      return 'OWNER';
+    }
+  }
+  return null;
+}
+
+/**
  * wa-webhook: Receives incoming WhatsApp messages from Evolution API
  * 
  * Evolution API sends webhooks for various events. We handle "messages.upsert".
@@ -231,13 +263,29 @@ serve(async (req) => {
 
     // handled_by === "AI" -> RAG + reply
     // Search documents for context
+    // Sector-based RAG: detect role tag from message keywords
+    const roleTag = detectSector(messageText);
+
     const { data: results } = await supabaseAdmin.rpc("search_documents", {
       p_client_id: clientId,
       p_query: messageText,
       p_limit: 3,
+      p_role_tag: roleTag,
     });
 
     let contextChunks = results || [];
+
+    // Fallback 1: If filtered search returned nothing, retry without role_tag
+    if (contextChunks.length === 0 && roleTag !== null) {
+      const { data: globalResults } = await supabaseAdmin.rpc("search_documents", {
+        p_client_id: clientId,
+        p_query: messageText,
+        p_limit: 3,
+      });
+      contextChunks = globalResults || [];
+    }
+
+    // Fallback 2: If still empty, fetch latest documents directly
     if (contextChunks.length === 0) {
       const { data: fallback } = await supabaseAdmin
         .from("documents")

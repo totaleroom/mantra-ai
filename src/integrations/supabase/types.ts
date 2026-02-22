@@ -55,6 +55,7 @@ export type Database = {
           daily_message_limit: number
           id: string
           industry: string | null
+          last_activity_at: string | null
           name: string
           quota_limit: number
           quota_remaining: number
@@ -67,6 +68,7 @@ export type Database = {
           daily_message_limit?: number
           id?: string
           industry?: string | null
+          last_activity_at?: string | null
           name: string
           quota_limit?: number
           quota_remaining?: number
@@ -79,6 +81,7 @@ export type Database = {
           daily_message_limit?: number
           id?: string
           industry?: string | null
+          last_activity_at?: string | null
           name?: string
           quota_limit?: number
           quota_remaining?: number
@@ -372,16 +375,32 @@ export type Database = {
         Returns: boolean
       }
       is_admin: { Args: never; Returns: boolean }
-      search_documents: {
-        Args: { p_client_id: string; p_limit?: number; p_query: string }
-        Returns: {
-          chunk_index: number
-          content: string
-          file_name: string
-          id: string
-          rank: number
-        }[]
-      }
+      search_documents:
+        | {
+            Args: { p_client_id: string; p_limit?: number; p_query: string }
+            Returns: {
+              chunk_index: number
+              content: string
+              file_name: string
+              id: string
+              rank: number
+            }[]
+          }
+        | {
+            Args: {
+              p_client_id: string
+              p_limit?: number
+              p_query: string
+              p_role_tag?: string
+            }
+            Returns: {
+              chunk_index: number
+              content: string
+              file_name: string
+              id: string
+              rank: number
+            }[]
+          }
     }
     Enums: {
       app_role: "admin"
