@@ -4,6 +4,69 @@
 
 ---
 
+## 📖 Panduan Penggunaan Platform
+
+### 1. Login sebagai Admin
+
+1. Buka halaman `/login`
+2. Masukkan email dan password akun admin yang sudah terdaftar
+3. Setelah login berhasil, Anda akan diarahkan ke dashboard admin
+4. Jika belum punya akun, hubungi admin utama untuk didaftarkan
+
+### 2. Mengelola Client
+
+**Lokasi:** Dashboard → **Clients** (`/admin/clients`)
+
+- **Tambah Client**: Klik tombol "Tambah Client", isi nama, industri, dan paket langganan
+- **Edit Client**: Klik ikon edit pada baris client untuk mengubah data
+- **Hapus Client**: Klik ikon hapus, konfirmasi penghapusan
+- **Filter & Cari**: Gunakan kolom pencarian untuk menemukan client berdasarkan nama
+- Setiap client memiliki quota pesan yang bisa diatur sesuai paket langganan
+
+### 3. Menghubungkan WhatsApp Device
+
+**Lokasi:** Dashboard → **Device & Connection** (`/admin/devices`)
+
+1. Pilih client yang ingin dihubungkan
+2. Klik "Connect Device" — sistem akan menampilkan QR Code
+3. Buka WhatsApp di HP → Settings → Linked Devices → Link a Device
+4. Scan QR Code yang ditampilkan di dashboard
+5. Status akan berubah menjadi "Connected" setelah berhasil
+6. Bot AI akan otomatis membalas pesan masuk sesuai knowledge base
+
+### 4. Upload Knowledge Base
+
+**Lokasi:** Dashboard → **Knowledge Base** (`/admin/knowledge-base`)
+
+1. Pilih client yang ingin ditambahkan knowledge base
+2. Klik "Upload Document"
+3. Pilih file PDF atau TXT yang berisi informasi produk/layanan
+4. Sistem akan memproses dan memecah dokumen menjadi chunks
+5. Setelah status "Processed", bot sudah bisa menjawab pertanyaan berdasarkan dokumen
+6. Anda bisa upload multiple dokumen untuk satu client
+
+### 5. Monitoring Pesan & Billing
+
+**Lokasi:** Dashboard → **Monitoring** (`/admin/monitoring`)
+
+- **Message Logs**: Lihat jumlah pesan per hari per client
+- **Token Usage**: Pantau penggunaan token AI
+- **Billing Alerts**: Notifikasi otomatis saat quota client hampir habis
+- **Statistik**: Grafik penggunaan harian/mingguan
+
+### 6. Test Bot Response (RAG)
+
+**Lokasi:** Dashboard → **Knowledge Base** → tombol "Test Bot"
+
+1. Pilih client yang sudah memiliki knowledge base
+2. Ketik pertanyaan di kolom test
+3. Bot akan menjawab berdasarkan dokumen yang sudah di-upload
+4. Gunakan fitur ini untuk memastikan jawaban bot sesuai sebelum go-live
+
+> **Catatan**: Fitur Test Bot memerlukan edge function `test-rag` yang perlu dikonfigurasi terpisah.
+
+---
+
 ## 🏗️ Arsitektur
 
 ```
@@ -35,7 +98,7 @@
 │   │   ├── admin/          # Komponen dashboard admin
 │   │   ├── landing/        # Komponen landing page
 │   │   └── ui/             # shadcn/ui components
-│   ├── hooks/              # Custom React hooks
+│   ├── hooks/              # Custom React hooks (useAuth, useMobile)
 │   ├── integrations/       # Backend client & types (auto-generated)
 │   ├── lib/                # Utility functions
 │   ├── pages/              # Route pages
@@ -106,7 +169,6 @@ npm run build
 ### Langkah 2: Upload ke VPS
 
 ```bash
-# Upload dist/ ke VPS
 scp -r dist/ user@your-vps-ip:/var/www/mantra-ai/
 ```
 
@@ -123,18 +185,15 @@ server {
     listen 443 ssl http2;
     server_name yourdomain.com www.yourdomain.com;
 
-    # SSL (Let's Encrypt)
     ssl_certificate /etc/letsencrypt/live/yourdomain.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/yourdomain.com/privkey.pem;
 
-    # Security headers
     add_header X-Frame-Options "SAMEORIGIN" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-XSS-Protection "1; mode=block" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
 
-    # Gzip compression
     gzip on;
     gzip_vary on;
     gzip_min_length 1024;
@@ -143,25 +202,22 @@ server {
     root /var/www/mantra-ai;
     index index.html;
 
-    # SPA routing — semua route diarahkan ke index.html
     location / {
         try_files $uri $uri/ /index.html;
     }
 
-    # Cache static assets
     location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|otf)$ {
         expires 1y;
         add_header Cache-Control "public, immutable";
     }
 
-    # Deny access to hidden files
     location ~ /\. {
         deny all;
     }
 }
 ```
 
-### Langkah 4: Setup SSL dengan Let's Encrypt
+### Langkah 4: Setup SSL
 
 ```bash
 sudo apt install certbot python3-certbot-nginx
@@ -184,19 +240,34 @@ sudo systemctl restart nginx
 | `VITE_SUPABASE_URL` | URL backend (otomatis dari Lovable Cloud) | ✅ |
 | `VITE_SUPABASE_PUBLISHABLE_KEY` | Public API key (otomatis) | ✅ |
 
-> **Catatan**: Saat menggunakan Lovable Cloud, semua environment variables sudah otomatis dikonfigurasi. Anda hanya perlu mengaturnya manual jika deploy ke VPS sendiri.
+> **Catatan**: Saat menggunakan Lovable Cloud, semua environment variables sudah otomatis dikonfigurasi.
 
 ---
 
 ## 📊 Fitur Utama
 
-- **Landing Page**: Halaman marketing dengan SEO lengkap, JSON-LD structured data
-- **Admin Dashboard**: Manajemen klien, device WhatsApp, knowledge base, monitoring
-- **Authentication**: Login/register dengan email verification
-- **Role-Based Access**: Hanya admin yang bisa mengakses dashboard
-- **Anti-Bot**: Honeypot field pada form login/register
-- **SEO Ready**: Meta tags, Open Graph, sitemap.xml, robots.txt, AI crawler support
-- **AI Search Discoverable**: Structured data untuk Perplexity, ChatGPT, Gemini
+| Fitur | Deskripsi | Status |
+|-------|-----------|--------|
+| **Landing Page** | Halaman marketing dengan SEO, JSON-LD structured data | ✅ Ready |
+| **Admin Dashboard** | Manajemen klien, device, knowledge base, monitoring | ✅ Ready |
+| **Authentication** | Login/register dengan email verification | ✅ Ready |
+| **Role-Based Access** | Hanya admin yang bisa mengakses dashboard | ✅ Ready |
+| **Anti-Bot** | Honeypot field pada form login/register | ✅ Ready |
+| **SEO** | Meta tags, Open Graph, sitemap.xml, robots.txt | ✅ Ready |
+| **WhatsApp Integration** | QR code pairing, session management | ✅ Ready |
+| **Knowledge Base (RAG)** | Upload PDF/TXT, chunking, embedding | ✅ Ready |
+| **Monitoring** | Message logs, token usage, billing alerts | ✅ Ready |
+| **Test Bot** | Test response RAG sebelum go-live | ⚠️ Perlu edge function |
+
+---
+
+## 🔒 Keamanan
+
+- **RLS (Row Level Security)** aktif di semua tabel, dibatasi ke `authenticated` role
+- **Admin-only access** menggunakan fungsi `is_admin()` (security definer)
+- **Honeypot** anti-bot pada form login
+- **Input validation** menggunakan Zod schema
+- **Email verification** wajib sebelum bisa login
 
 ---
 
@@ -207,14 +278,6 @@ sudo systemctl restart nginx
 3. Commit perubahan: `git commit -m "Tambah fitur X"`
 4. Push ke branch: `git push origin fitur/nama-fitur`
 5. Buat Pull Request
-
-### Panduan Kode
-
-- Gunakan TypeScript strict mode
-- Ikuti design system (semantic tokens dari `index.css`)
-- Komponen UI menggunakan shadcn/ui
-- Semua warna harus menggunakan HSL via CSS variables
-- Test sebelum commit
 
 ---
 
