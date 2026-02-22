@@ -1,131 +1,93 @@
 
-# Admin Setup + Security Hardening — Mantra AI
 
-## 1. Tambah Admin (totale.room@gmail.com)
+# Perbaikan End-to-End + Optimasi + Signup Text
 
-Email `totale.room@gmail.com` belum terdaftar di database. Anda perlu **signup dulu** melalui halaman `/login` (atau kita bisa buatkan tombol signup). Setelah signup berhasil, saya akan insert role admin ke tabel `user_roles`.
+## Temuan dari Audit
 
-**Langkah:**
-1. Tambah fitur signup di halaman Login (toggle Login/Register)
-2. Setelah Anda signup, saya insert `user_roles` record dengan role `admin`
-3. Atau alternatif: saya langsung buat akun via SQL dan insert admin role sekaligus
+Setelah melakukan pengecekan menyeluruh, berikut temuan dan rencana perbaikan:
 
-**Rekomendasi:** Saya akan menambah toggle Register di halaman Login agar Anda bisa signup langsung. Setelah itu saya insert admin role.
+### 1. Login Page — Signup Text
+Halaman login sudah memiliki toggle "Belum punya akun? Daftar". Akan diperkecil dan dibuat lebih jelas sebagai teks biasa (bukan tombol ghost) agar lebih mudah ditemukan.
 
----
+### 2. Bug Kritis: Anti-Iframe Memblokir Preview
+Kode framebusting di `src/main.tsx` (`window.top !== window.self`) memblokir app saat dijalankan di dalam iframe — termasuk di Lovable preview. Perbaikan: hanya aktifkan di production domain (bukan di `*.lovableproject.com` atau `*.lovable.app`).
 
-## 2. Security Enhancements (Yang Berlaku untuk Project Ini)
+### 3. Bug CSP: Realtime WebSocket Diblokir
+CSP di `index.html` tidak menyertakan `wss://*.supabase.co` di `connect-src`. Ini akan memblokir Supabase Realtime (dipakai oleh Device & Connection untuk QR live update). Perbaikan: tambah `wss://*.supabase.co` ke `connect-src`.
 
-Dari audit keamanan yang Anda berikan, berikut yang **relevan dan bisa diterapkan** di project Mantra ini:
+### 4. React Warning: forwardRef pada App
+Console menunjukkan warning "Function components cannot be given refs" pada `App`. Ini karena App component di-render sebagai arrow function tanpa forwardRef. Tidak kritis tapi akan di-fix.
 
-### 2a. Content Security Policy (CSP) di `index.html`
+### 5. Responsiveness
+- Landing page: Sudah responsif di mobile (390px), tablet, dan desktop
+- Login page: Sudah responsif di semua ukuran
+- Admin pages: Menggunakan Sidebar component yang sudah collapsible di mobile
 
-Tambah meta tag CSP untuk memblokir:
-- Script injection dari domain luar (iklan judi, malware)
-- Cache poisoning
-- Clickjacking via iframe
+### 6. Asset Compression
+Logo PNG files (`logo_mantra.png`, `logo_mantra_horizontal.png`) kemungkinan besar oversize untuk kebutuhan tampil sebagai ikon 64px dan header 28px. Kita bisa mengompres atau menggunakan dimensi yang lebih kecil. Akan dicek ukuran aktual dan kompres jika perlu, atau tambahkan `loading="lazy"` + `width/height` attributes.
 
-```text
-CSP directives:
-- default-src 'self'
-- script-src 'self' 'unsafe-inline'
-- style-src 'self' 'unsafe-inline' https://fonts.googleapis.com
-- font-src 'self' https://fonts.gstatic.com
-- img-src 'self' data: https: blob:
-- connect-src 'self' https://*.supabase.co
-- frame-src 'none'
-- object-src 'none'
-- base-uri 'self'
-```
-
-### 2b. Security Headers di `index.html`
-
-- `X-Content-Type-Options: nosniff` — cegah MIME sniffing
-- `X-Frame-Options: DENY` — cegah embedding di iframe
-- `Referrer-Policy: strict-origin-when-cross-origin` — batasi referrer info
-
-### 2c. Anti-Iframe Framebusting di `src/main.tsx`
-
-Deteksi jika app di-load di dalam iframe (framing attack) dan blokir.
-
-### 2d. Honeypot Anti-Bot di Form Login
-
-Tambah hidden field di form login. Bot akan mengisi field ini, user asli tidak. Jika terisi, tolak submit. Ini alternatif CAPTCHA tanpa mengganggu UX.
-
-### 2e. Input Validation dengan Zod di Login Form
-
-Tambah validasi Zod untuk email dan password sebelum kirim ke backend.
+### 7. Performance Quick Wins
+- Tambah `loading="lazy"` pada gambar yang tidak di above-the-fold
+- Tambah explicit `width` dan `height` pada `<img>` tag untuk menghindari layout shift
 
 ---
 
-## 3. Yang TIDAK Relevan (Skip)
+## Rencana Perubahan
 
-Item dari audit sebelumnya yang **tidak berlaku** untuk project ini:
+### File: `src/main.tsx`
+- Perbaiki framebusting: hanya blokir jika bukan domain Lovable (production safety)
 
-| Item | Alasan Skip |
-|------|-------------|
-| Rate limit edge functions | Belum ada edge function di project ini (akan dibuat nanti di Phase Knowledge Base) |
-| `analyze-cv`, `validate-license`, dll | Fungsi-fungsi ini dari project lain, tidak ada di Mantra |
-| DOMPurify di ModuleReader | Tidak ada ModuleReader di project ini |
-| CAPTCHA | Honeypot sudah cukup untuk admin-only login |
+### File: `index.html`
+- Tambah `wss://*.supabase.co` ke CSP `connect-src`
 
-Rate limiting akan diterapkan nanti saat edge functions `process-document` dan `test-rag` dibuat.
+### File: `src/pages/Login.tsx`
+- Ubah toggle "Belum punya akun? Daftar" dari Button ghost menjadi teks kecil `<p>` yang lebih natural
+- Pastikan tetap berfungsi sebagai toggle
 
----
+### File: `src/components/landing/Navbar.tsx`, `Footer.tsx`, `AdminSidebar.tsx`
+- Tambah `loading="lazy"`, `width`, `height` pada logo images
+- Pastikan dimensi sesuai kebutuhan tampil
 
-## File yang Diubah
-
-| File | Perubahan |
-|------|-----------|
-| `index.html` | CSP meta tag, X-Content-Type-Options, X-Frame-Options, Referrer-Policy |
-| `src/main.tsx` | Anti-iframe framebusting script |
-| `src/pages/Login.tsx` | Honeypot field, Zod validation, toggle Register/Login |
-| `src/hooks/useAuth.ts` | Tambah fungsi `signUp` |
+### File: `src/App.tsx`
+- Tidak ada perubahan diperlukan (warning hanya development, tidak mempengaruhi production)
 
 ---
 
 ## Detail Teknis
 
-### Login.tsx — Perubahan
-
-1. **Honeypot field**: Hidden input `name="website"` yang tidak terlihat user
-2. **Zod validation**: Schema validasi email (valid format) + password (min 6 char)
-3. **Toggle mode**: Tombol switch antara "Masuk" dan "Daftar"
-4. **SignUp flow**: Memanggil `supabase.auth.signUp()` lalu tampilkan pesan "Cek email untuk verifikasi"
-
-### useAuth.ts — Tambah signUp
-
+### main.tsx — Framebusting Perbaikan
 ```typescript
-const signUp = async (email: string, password: string) => {
-  const { error } = await supabase.auth.signUp({ email, password });
-  if (error) throw error;
-};
-```
-
-### main.tsx — Framebusting
-
-```typescript
+// Only block iframe in production (not in Lovable preview/dev)
 if (window.top !== window.self) {
-  document.body.innerHTML = '<h1>Access Denied</h1>';
+  const hostname = window.location.hostname;
+  const isLovable = hostname.includes('lovableproject.com') || hostname.includes('lovable.app');
+  if (!isLovable) {
+    document.body.innerHTML = '<h1 style="text-align:center;margin-top:40vh;font-family:sans-serif">Access Denied</h1>';
+  }
 }
 ```
 
-### Admin Role Insert
-
-Setelah Anda signup dan verifikasi email, saya akan menjalankan:
-```sql
-INSERT INTO user_roles (user_id, role)
-SELECT id, 'admin' FROM auth.users
-WHERE email = 'totale.room@gmail.com';
+### index.html — CSP Fix
+```text
+connect-src 'self' https://*.supabase.co wss://*.supabase.co;
 ```
 
----
+### Login.tsx — Signup Text
+Ganti Button ghost dengan teks kecil:
+```tsx
+<p className="mt-4 text-center text-sm text-muted-foreground">
+  {mode === "login" ? "Belum punya akun? " : "Sudah punya akun? "}
+  <button
+    type="button"
+    onClick={() => setMode(mode === "login" ? "register" : "login")}
+    className="font-medium text-primary underline-offset-4 hover:underline"
+  >
+    {mode === "login" ? "Daftar di sini" : "Masuk"}
+  </button>
+</p>
+```
 
-## Urutan Implementasi
+### Image Optimization
+- Tambah `width` dan `height` explicit pada semua `<img>` tag
+- Tambah `loading="lazy"` pada logo di footer (below fold)
 
-1. Update `index.html` dengan security headers + CSP
-2. Update `src/main.tsx` dengan anti-iframe
-3. Update `src/pages/Login.tsx` dengan honeypot + Zod + signup toggle
-4. Update `src/hooks/useAuth.ts` dengan signUp function
-5. Anda signup via form baru
-6. Insert admin role ke database
