@@ -68,7 +68,7 @@ const Login = () => {
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="w-full max-w-sm">
         <div className="text-center">
-          <img src={logoCircle} alt="Mantra AI" className="mx-auto mb-6 h-16 w-16" />
+          <img src={logoCircle} alt="Mantra AI" className="mx-auto mb-6 h-16 w-16" width={64} height={64} />
           <h1 className="mb-2 text-2xl font-extrabold text-foreground">
             {mode === "login" ? "Masuk ke MANTRA" : "Daftar Akun MANTRA"}
           </h1>
@@ -121,16 +121,16 @@ const Login = () => {
           </Button>
         </form>
 
-        <div className="mt-4 text-center">
-          <Button
-            variant="ghost"
-            size="sm"
+        <p className="mt-4 text-center text-sm text-muted-foreground">
+          {mode === "login" ? "Belum punya akun? " : "Sudah punya akun? "}
+          <button
+            type="button"
             onClick={() => setMode(mode === "login" ? "register" : "login")}
-            className="text-sm text-muted-foreground"
+            className="font-medium text-primary underline-offset-4 hover:underline"
           >
-            {mode === "login" ? "Belum punya akun? Daftar" : "Sudah punya akun? Masuk"}
-          </Button>
-        </div>
+            {mode === "login" ? "Daftar di sini" : "Masuk"}
+          </button>
+        </p>
 
         <div className="mt-2 text-center">
           <Button variant="link" size="sm" className="gap-1 text-muted-foreground" asChild>

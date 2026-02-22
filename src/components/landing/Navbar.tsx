@@ -19,7 +19,7 @@ const Navbar = () => {
       <div className="container mx-auto flex h-16 items-center justify-between px-4">
         {/* Logo */}
         <a href="#" className="flex items-center">
-          <img src={logoHorizontal} alt="Mantra AI" className="h-8" />
+          <img src={logoHorizontal} alt="Mantra AI" className="h-8" width={120} height={32} />
         </a>
 
         {/* Desktop Nav */}
