@@ -32,10 +32,11 @@ const Problem = () => {
             Masalah
           </span>
           <h2 className="mb-4 text-3xl font-extrabold tracking-tight text-foreground md:text-4xl">
-            Apakah Ini yang Bapak/Ibu Rasakan?
+            Chatbot Biasa Cuma Bisa Balas.{" "}
+            <span className="text-primary">MANTRA Bisa Bertindak.</span>
           </h2>
           <p className="text-muted-foreground">
-            Setiap hari menghadapi hal yang sama — capek, ribet, dan bisnis jalan di tempat.
+            Jangan sampai bisnis Anda kehilangan pelanggan karena CS yang lambat, kaku, dan tidak bisa closing.
           </p>
         </div>
 

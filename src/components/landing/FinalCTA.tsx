@@ -14,12 +14,12 @@ const FinalCTA = () => {
       <div className="container mx-auto px-4">
         <div className="mx-auto max-w-3xl rounded-3xl border border-primary/20 bg-primary/5 p-8 text-center md:p-12">
           <h2 className="mb-4 text-3xl font-extrabold tracking-tight text-foreground md:text-4xl">
-            Masih Mau Balas Chat{" "}
-            <span className="text-primary">Sampai Tengah Malam?</span>
+            Kompetitor Anda Sudah Pakai AI.{" "}
+            <span className="text-primary">Anda Kapan?</span>
           </h2>
           <p className="mb-8 text-lg text-muted-foreground">
-            Saatnya serahkan pekerjaan repetitif ke AI. Fokus pada apa yang benar-benar penting — 
-            mengembangkan bisnis dan menikmati hidup.
+            Setiap menit tanpa AI, ada pelanggan yang tidak terlayani dan order yang hilang. 
+            Mulai sekarang, biarkan MANTRA yang closing untuk Anda.
           </p>
 
           <div className="mb-8 flex flex-wrap items-center justify-center gap-4">

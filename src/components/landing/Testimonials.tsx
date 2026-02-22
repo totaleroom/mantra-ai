@@ -51,7 +51,8 @@ const Testimonials = () => {
             Testimoni
           </span>
           <h2 className="mb-4 text-3xl font-extrabold tracking-tight text-foreground md:text-4xl">
-            30+ UMKM Sudah Buktikan
+            Hasil Nyata,{" "}
+            <span className="text-primary">Bukan Janji Kosong</span>
           </h2>
         </div>
 
