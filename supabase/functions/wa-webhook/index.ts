@@ -392,27 +392,35 @@ serve(async (req) => {
 
     // === AI HANDLING ===
 
-    // Fetch last 10 messages for context memory
+    // === CONFIGURABLE AI PARAMETERS ===
+    const historyLength = parseInt(cfg.history_length || "10");
+    const charLimit = parseInt(cfg.history_char_limit || "3000");
+    const ragLimit = parseInt(cfg.rag_result_count || "3");
+    const useSectorDetection = cfg.sector_detection !== "false";
+    const noRagAction = cfg.no_rag_action || "escalate";
+    const escalationKeyword = cfg.escalation_keyword || "ESKALASI_HUMAN";
+
+    // Fetch messages for context memory (configurable length)
     const { data: chatHistory } = await supabaseAdmin
       .from("wa_messages")
       .select("sender, content, media_url")
       .eq("conversation_id", conversation!.id)
       .order("created_at", { ascending: true })
-      .limit(10);
+      .limit(historyLength);
 
     const historyMessages = buildChatMessages(chatHistory || []);
-    const trimmedMessages = trimHistoryByCharLimit(historyMessages, 3000);
+    const trimmedMessages = trimHistoryByCharLimit(historyMessages, charLimit);
 
-    // Sector-based RAG search
+    // Sector-based RAG search (configurable)
     const searchText = effectiveText || "";
-    const roleTag = searchText ? detectSector(searchText) : null;
+    const roleTag = useSectorDetection && searchText ? detectSector(searchText) : null;
 
     let contextChunks: any[] = [];
     if (searchText) {
       const { data: results } = await supabaseAdmin.rpc("search_documents", {
         p_client_id: clientId,
         p_query: searchText,
-        p_limit: 3,
+        p_limit: ragLimit,
         p_role_tag: roleTag,
       });
       contextChunks = results || [];
@@ -422,7 +430,7 @@ serve(async (req) => {
         const { data: globalResults } = await supabaseAdmin.rpc("search_documents", {
           p_client_id: clientId,
           p_query: searchText,
-          p_limit: 3,
+          p_limit: ragLimit,
         });
         contextChunks = globalResults || [];
       }
@@ -437,16 +445,35 @@ serve(async (req) => {
         .eq("status", "ready")
         .not("content", "is", null)
         .order("created_at", { ascending: false })
-        .limit(3);
+        .limit(ragLimit);
       contextChunks = fallback || [];
     }
 
+    // No-RAG Fallback: configurable action
     if (contextChunks.length === 0) {
-      await escalateToHuman(supabaseAdmin, conversation!.id, phoneNumber, instanceName);
-      return new Response(
-        JSON.stringify({ status: "escalated_no_knowledge" }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      if (noRagAction === "answer_without") {
+        // Continue to AI without context
+        console.log("No RAG context found, answering without context (configured)");
+      } else if (noRagAction === "custom_message") {
+        const customMsg = (cfg.no_rag_message || "Maaf, saya belum bisa menjawab pertanyaan ini.").replace(/^"|"$/g, "");
+        await sendWhatsAppMessage(phoneNumber, customMsg, instanceName);
+        await supabaseAdmin.from("wa_messages").insert({
+          conversation_id: conversation!.id,
+          sender: "AI",
+          content: customMsg,
+        });
+        return new Response(
+          JSON.stringify({ status: "custom_no_rag_reply" }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      } else {
+        // Default: escalate
+        await escalateToHuman(supabaseAdmin, conversation!.id, phoneNumber, instanceName, cfg);
+        return new Response(
+          JSON.stringify({ status: "escalated_no_knowledge" }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
     }
 
     const context = contextChunks
@@ -493,7 +520,7 @@ serve(async (req) => {
 
     if (!aiResponse.ok) {
       console.error("AI error:", aiResponse.status);
-      await escalateToHuman(supabaseAdmin, conversation!.id, phoneNumber, instanceName);
+      await escalateToHuman(supabaseAdmin, conversation!.id, phoneNumber, instanceName, cfg);
       return new Response(
         JSON.stringify({ status: "escalated_ai_error" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -534,8 +561,8 @@ serve(async (req) => {
         .eq("id", clientId);
     }
 
-    if (answer.includes("ESKALASI_HUMAN")) {
-      await escalateToHuman(supabaseAdmin, conversation!.id, phoneNumber, instanceName);
+    if (answer.includes(escalationKeyword)) {
+      await escalateToHuman(supabaseAdmin, conversation!.id, phoneNumber, instanceName, cfg);
       return new Response(
         JSON.stringify({ status: "escalated" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -600,14 +627,15 @@ async function escalateToHuman(
   supabase: any,
   conversationId: string,
   phoneNumber: string,
-  instanceName: string
+  instanceName: string,
+  cfg: Record<string, string> = {}
 ) {
   await supabase
     .from("wa_conversations")
     .update({ handled_by: "HUMAN", updated_at: new Date().toISOString() })
     .eq("id", conversationId);
 
-  const escalationMsg = "Mohon tunggu kak, saya sedang menyambungkan dengan Admin kami. 🙏";
+  const escalationMsg = (cfg.escalation_message || "Mohon tunggu kak, saya sedang menyambungkan dengan Admin kami. 🙏").replace(/^"|"$/g, "");
   await sendWhatsAppMessage(phoneNumber, escalationMsg, instanceName);
 
   await supabase.from("wa_messages").insert({

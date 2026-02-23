@@ -17,7 +17,8 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { Loader2, Plus, Trash2, TestTube, Save, Copy, CheckCircle } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Loader2, Plus, Trash2, TestTube, Save, Copy, CheckCircle, ArrowRight, Brain, MessageSquare, Database } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSettings, useAdminUsers } from "@/hooks/useAdminData";
@@ -369,9 +370,148 @@ export default function Settings() {
               <p className="text-xs text-muted-foreground">0 = deterministik, 1 = kreatif</p>
             </div>
 
-            <Button onClick={() => saveSettings({ ai_system_prompt: settings.ai_system_prompt || "", ai_model: settings.ai_model || "", ai_temperature: settings.ai_temperature || "0.3", ai_max_tokens: settings.ai_max_tokens || "1024" })} disabled={saving}>
+            <Separator />
+
+            {/* Section B: AI Behavior Pipeline */}
+            <div className="space-y-1">
+              <h4 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                <Brain className="h-4 w-4" /> AI Behavior Pipeline
+              </h4>
+              <p className="text-xs text-muted-foreground">Kontrol perilaku AI saat merespon pesan masuk.</p>
+            </div>
+
+            {/* Visual Pipeline */}
+            <div className="rounded-lg border border-border bg-muted/30 p-4">
+              <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground flex-wrap">
+                <span className="px-2 py-1 rounded border border-border bg-background">Pesan Masuk</span>
+                <ArrowRight className="h-3 w-3 shrink-0" />
+                <span className="px-2 py-1 rounded border border-border bg-background">Cek RAG Context</span>
+                <ArrowRight className="h-3 w-3 shrink-0" />
+                <span className="px-2 py-1 rounded border border-primary/30 bg-primary/10 text-primary">Ada Context?</span>
+                <ArrowRight className="h-3 w-3 shrink-0" />
+                <span className="px-2 py-1 rounded border border-border bg-background">
+                  {(settings.no_rag_action || "escalate") === "escalate" ? "Eskalasi" : (settings.no_rag_action || "escalate") === "answer_without" ? "Jawab Tanpa Context" : "Pesan Custom"}
+                </span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>No-RAG Fallback Action</Label>
+                <Select value={settings.no_rag_action || "escalate"} onValueChange={(v) => updateSetting("no_rag_action", v)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="escalate">Eskalasi ke Admin</SelectItem>
+                    <SelectItem value="answer_without">Jawab Tanpa Context</SelectItem>
+                    <SelectItem value="custom_message">Kirim Pesan Custom</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">Aksi jika tidak ada dokumen RAG yang cocok.</p>
+              </div>
+              <div className="space-y-2">
+                <Label>Escalation Keyword</Label>
+                <Input
+                  value={settings.escalation_keyword || "ESKALASI_HUMAN"}
+                  onChange={(e) => updateSetting("escalation_keyword", e.target.value)}
+                  placeholder="ESKALASI_HUMAN"
+                />
+                <p className="text-xs text-muted-foreground">Kata kunci trigger eskalasi dari respons AI.</p>
+              </div>
+            </div>
+
+            {(settings.no_rag_action === "custom_message") && (
+              <div className="space-y-2">
+                <Label>Pesan Custom (No-RAG Fallback)</Label>
+                <Textarea
+                  rows={3}
+                  value={settings.no_rag_message ? settings.no_rag_message.replace(/^"|"$/g, "") : ""}
+                  onChange={(e) => updateSetting("no_rag_message", JSON.stringify(e.target.value))}
+                  placeholder="Maaf, saya belum bisa menjawab pertanyaan ini..."
+                />
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label>Pesan Eskalasi ke Customer</Label>
+              <Textarea
+                rows={3}
+                value={settings.escalation_message ? settings.escalation_message.replace(/^"|"$/g, "") : ""}
+                onChange={(e) => updateSetting("escalation_message", JSON.stringify(e.target.value))}
+                placeholder="Mohon tunggu kak, saya sedang menyambungkan dengan Admin kami. 🙏"
+              />
+              <p className="text-xs text-muted-foreground">Pesan yang dikirim ke customer saat percakapan di-eskalasi.</p>
+            </div>
+
+            <Separator />
+
+            {/* Section C: Context & Memory */}
+            <div className="space-y-1">
+              <h4 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                <Database className="h-4 w-4" /> Context & Memory
+              </h4>
+              <p className="text-xs text-muted-foreground">Atur seberapa banyak konteks yang dikirim ke AI.</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>History Length: {settings.history_length || "10"} pesan</Label>
+              <Slider
+                value={[parseInt(settings.history_length || "10")]}
+                onValueChange={([v]) => updateSetting("history_length", String(v))}
+                min={1} max={20} step={1}
+              />
+              <p className="text-xs text-muted-foreground">Jumlah pesan terakhir yang dikirim ke AI sebagai konteks memori.</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>History Char Limit</Label>
+                <Input
+                  type="number"
+                  value={settings.history_char_limit || "3000"}
+                  onChange={(e) => updateSetting("history_char_limit", e.target.value)}
+                  min={500} max={10000}
+                />
+                <p className="text-xs text-muted-foreground">Batas karakter total history chat.</p>
+              </div>
+              <div className="space-y-2">
+                <Label>RAG Result Count</Label>
+                <Input
+                  type="number"
+                  value={settings.rag_result_count || "3"}
+                  onChange={(e) => updateSetting("rag_result_count", e.target.value)}
+                  min={1} max={10}
+                />
+                <p className="text-xs text-muted-foreground">Jumlah chunk dokumen yang dicari.</p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between rounded-lg border border-border p-4">
+              <div className="space-y-0.5">
+                <Label>Sector Detection (Multi-Role RAG)</Label>
+                <p className="text-xs text-muted-foreground">Deteksi sektor WAREHOUSE/OWNER untuk pencarian dokumen yang lebih tepat.</p>
+              </div>
+              <Switch
+                checked={settings.sector_detection !== "false"}
+                onCheckedChange={(checked) => updateSetting("sector_detection", String(checked))}
+              />
+            </div>
+
+            <Button onClick={() => saveSettings({
+              ai_system_prompt: settings.ai_system_prompt || "",
+              ai_model: settings.ai_model || "",
+              ai_temperature: settings.ai_temperature || "0.3",
+              ai_max_tokens: settings.ai_max_tokens || "1024",
+              no_rag_action: settings.no_rag_action || "escalate",
+              no_rag_message: settings.no_rag_message || "",
+              escalation_keyword: settings.escalation_keyword || "ESKALASI_HUMAN",
+              escalation_message: settings.escalation_message || "",
+              history_length: settings.history_length || "10",
+              history_char_limit: settings.history_char_limit || "3000",
+              rag_result_count: settings.rag_result_count || "3",
+              sector_detection: settings.sector_detection || "true",
+            })} disabled={saving}>
               {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              <Save className="mr-2 h-4 w-4" /> Simpan
+              <Save className="mr-2 h-4 w-4" /> Simpan Semua AI Config
             </Button>
           </div>
         </TabsContent>
@@ -405,17 +545,7 @@ export default function Settings() {
                 <Input type="number" value={settings.anti_ban_delay_max || "4"} onChange={(e) => updateSetting("anti_ban_delay_max", e.target.value)} min={2} max={15} />
               </div>
             </div>
-            <Separator />
-            <div className="space-y-2">
-              <Label>Pesan Eskalasi ke Customer</Label>
-              <Textarea
-                rows={3}
-                value={settings.escalation_message ? settings.escalation_message.replace(/^"|"$/g, "") : ""}
-                onChange={(e) => updateSetting("escalation_message", JSON.stringify(e.target.value))}
-                placeholder="Pesan yang dikirim saat customer di-eskalasi ke admin..."
-              />
-            </div>
-            <Button onClick={() => saveSettings({ default_daily_message_limit: settings.default_daily_message_limit || "300", default_quota_limit: settings.default_quota_limit || "1000", anti_ban_delay_min: settings.anti_ban_delay_min || "2", anti_ban_delay_max: settings.anti_ban_delay_max || "4", escalation_message: settings.escalation_message || "" })} disabled={saving}>
+            <Button onClick={() => saveSettings({ default_daily_message_limit: settings.default_daily_message_limit || "300", default_quota_limit: settings.default_quota_limit || "1000", anti_ban_delay_min: settings.anti_ban_delay_min || "2", anti_ban_delay_max: settings.anti_ban_delay_max || "4" })} disabled={saving}>
               {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               <Save className="mr-2 h-4 w-4" /> Simpan
             </Button>
