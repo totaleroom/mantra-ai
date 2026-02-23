@@ -1,158 +1,155 @@
 
 
-# Dashboard MANTRA: Enterprise-Grade Rombak Total
+# AI Configuration Transparency & Behavior Pipeline
 
-## Ringkasan
+## Masalah
 
-Rombak dashboard menjadi gaya **Industrial Minimalist** (NEURAL OS) dengan 3 enhancement tambahan:
-1. **VPS/System Resource Widget** -- menampilkan usage metrics dari data yang sudah ada
-2. **Raw System Logs Widget** -- live activity feed mirip referensi
-3. **Enterprise-grade information density** -- lebih banyak data actionable dalam satu layar
+Banyak perilaku kritis AI yang hardcoded di `wa-webhook/index.ts` dan tidak bisa diubah tanpa edit kode. Admin tidak tahu apa yang terjadi "di balik layar" ketika AI merespon.
+
+## Solusi: Enhanced AI Settings + Webhook Update
+
+Daripada membangun sistem node visual seperti n8n (yang membutuhkan ratusan jam development), kita buat **AI Behavior Configuration** yang transparan di halaman Settings -- semua parameter yang mengontrol perilaku AI bisa dilihat dan diubah oleh admin.
 
 ---
 
-## Layout Grid (Asymmetric)
+## Kenapa BUKAN n8n-style Node Editor
 
-```text
-Row 1: [Active Clients] [Messages Today] [Quota Usage %]
-         1fr              1.5fr            1fr
+| Aspek | n8n-style Nodes | AI Behavior Config |
+|-------|----------------|-------------------|
+| Development time | 200+ jam (drag-drop, canvas, node types) | 8-10 jam |
+| Maintenance | Sangat kompleks | Minimal |
+| User skill needed | Perlu pemahaman teknis | Form sederhana |
+| Fleksibilitas | Sangat tinggi | Cukup untuk 95% use case |
+| Risk | Over-engineering | Pragmatis |
 
-Row 2: [Needs Attention - 2 col]  [System Health - 1 col]
+Jika nanti kebutuhan benar-benar memerlukan visual pipeline, bisa diintegrasikan dengan n8n yang sudah ada (via MCP connector) daripada membangun ulang dari nol.
 
-Row 3: [Resource Allocation - 1 col] [Raw System Logs - 2 col, dark bg]
+---
+
+## Perubahan Detail
+
+### 1. Settings UI (`src/pages/admin/Settings.tsx`)
+
+Rombak tab "AI Configuration" menjadi lebih komprehensif dengan 3 section:
+
+**Section A: Model & Prompt (sudah ada, diperbaiki)**
+- Model selector (sudah ada)
+- Temperature slider (sudah ada)
+- Max tokens (sudah ada)
+- System prompt + presets (sudah ada)
+- BARU: **Context injection mode** -- dropdown: "Append to prompt" / "Replace {{context}} placeholder"
+- BARU: **Business name override** -- input text (saat ini selalu pakai `clients.name`)
+
+**Section B: AI Behavior Pipeline (BARU)**
+Tampilan visual sederhana yang menunjukkan alur keputusan AI:
+
+```
+[Pesan Masuk] --> [Cek RAG Context] --> [Ada?]
+                                          |
+                                     Ya --+--> [Kirim ke AI + Context]
+                                          |
+                                     Tidak -> [??? Configurable]
 ```
 
-Responsive: pada mobile semua menjadi 1 kolom.
+Setting yang bisa diubah:
+- **No-RAG Fallback Action** -- dropdown:
+  - "Eskalasi ke admin" (default saat ini)
+  - "Jawab tanpa context" (AI tetap jawab tapi tanpa RAG)
+  - "Kirim pesan custom" (admin tulis pesan fallback sendiri)
+- **No-RAG Fallback Message** -- textarea (muncul jika pilih "Kirim pesan custom")
+- **Escalation Keyword** -- input text (default: "ESKALASI_HUMAN", bisa diganti)
+- **Escalation Message** -- textarea (sudah ada settingnya tapi belum dipakai di webhook!)
+
+**Section C: Context & Memory (BARU)**
+- **History Length** -- slider 1-20 (default: 10) -- berapa pesan terakhir dikirim ke AI
+- **History Char Limit** -- input number (default: 3000) -- batas karakter untuk trimming
+- **RAG Result Count** -- input number 1-10 (default: 3) -- berapa chunk dokumen dicari
+- **Sector Detection** -- toggle on/off (default: on) -- apakah pakai deteksi sektor WAREHOUSE/OWNER
 
 ---
 
-## Widget Detail
+### 2. Webhook Update (`supabase/functions/wa-webhook/index.ts`)
 
-### Row 1: Metric Cards (3 buah, gaya dot-matrix besar)
+Update webhook untuk membaca semua config baru dari `platform_settings` (tabel `cfg` sudah di-load di line 292-298):
 
-| Card | Data Source | Display |
-|------|-----------|---------|
-| **Active Clients** | `useClients()` filtered active | Angka `font-mono text-7xl`, subtitle "+X since last week" (bisa dihitung dari `created_at`) |
-| **Messages Today** | `useMessageStats()` | Angka besar, subtitle quota harian |
-| **Quota Usage** | `useClients()` sum `quota_remaining / quota_limit` | Persentase besar + progress bar industrial-style |
+**Perubahan spesifik:**
 
-Styling: `border border-foreground/20 bg-card`, hover lift `-translate-y-0.5`, label `text-[10px] uppercase tracking-widest`
-
-### Row 2: Needs Attention (2 col) + System Health (1 col)
-
-**Needs Attention** (sama seperti referensi "Agent Status Visualizer"):
-- Jika kosong: tampilan centered dengan ikon besar + teks "ALL SYSTEMS NOMINAL"  
-- Jika ada items: list dengan indikator merah, clickable ke halaman terkait
-
-**System Health / Resource Allocation** (mirip "Resource Allocation" di referensi):
-- **WA Sessions**: bar horizontal `connected/total` sebagai persentase, label `WA-SESSIONS`, value `"2/3"` di kanan
-- **Evolution API**: bar 0% atau 100%, label `EVO-API-GATEWAY`
-- **Quota Pool**: total `quota_remaining / quota_limit` semua client, bar horizontal
-- **Knowledge Base**: jumlah dokumen ready vs total
-- Styling: bar tebal `h-8 border border-foreground/20` dengan fill `bg-foreground`
-- Footer: rekomendasi teks italic jika ada resource yang kritis
-
-### Row 3: Resource Bars (1 col) + System Logs (2 col, dark)
-
-**Resource Bars** (VPS/Load simulasi dari data nyata):
-- Karena MANTRA berjalan di Lovable Cloud (bukan VPS sendiri), kita **tidak bisa** mengakses CPU/RAM VPS secara langsung
-- Sebagai gantinya, kita tampilkan **operational metrics** yang bermakna:
-  - **MSG-THROUGHPUT**: pesan hari ini vs daily limit tertinggi dari semua client (sebagai % utilization)
-  - **TOKEN-BURN-RATE**: token usage hari ini dari `message_logs`
-  - **SESSION-UPTIME**: rasio connected sessions
-- Ini memberikan informasi "load" yang relevan tanpa perlu akses VPS
-
-**Raw System Logs** (dark card, mirip referensi):
-- Background `bg-foreground text-background` (hitam di light mode)
-- Data source: **gabungan real-time dari beberapa query**:
-  - 5 pesan terbaru dari `wa_messages` (format: `> [MSG] Customer "Budi" -> Client "Salon ABC"`)
-  - Billing alerts terbaru dari `billing_alerts` (format: `> [WARN] Quota rendah: Client XYZ`)
-  - Eskalasi aktif (format: `> [CRITICAL] Eskalasi menunggu: Customer "Rina"` -- warna merah)
-  - Session changes (format: `> [INFO] WA Session connected: Client ABC`)
-- Scrollable `max-h-48 overflow-y-auto` dengan custom scrollbar
-- Item critical berwarna `text-destructive` (merah)
-- Footer: `MANTRA AI / Runtime v2.4.0` + timestamp
-
----
-
-## Hook Baru: `useDashboardLogs`
-
-Tambah hook baru di `useAdminData.ts` untuk fetch "system logs":
-
-```text
-export function useDashboardLogs() {
-  return useQuery({
-    queryKey: ["dashboardLogs"],
-    queryFn: async () => {
-      // Parallel fetch:
-      // 1. Latest 5 wa_messages with customer name + client name
-      // 2. Latest 3 unread billing_alerts
-      // 3. Active human escalations
-      // Merge + sort by created_at desc
-      // Return as { level: "info"|"warn"|"critical", message: string, timestamp: Date }[]
-    },
-    staleTime: 15_000,
-    refetchInterval: 15_000,  // auto-refresh setiap 15 detik
-  });
-}
+a) **No-RAG Fallback** (line 444-449):
 ```
-
-## Hook Baru: `useTokenUsageToday`
-
-```text
-export function useTokenUsageToday() {
-  return useQuery({
-    queryKey: ["tokenUsageToday"],
-    queryFn: async () => {
-      const today = new Date().toISOString().split("T")[0];
-      const { data } = await supabase
-        .from("message_logs")
-        .select("token_usage")
-        .eq("log_date", today);
-      return (data || []).reduce((sum, r) => sum + (r.token_usage || 0), 0);
-    },
-    staleTime: 30_000,
-  });
-}
-```
-
----
-
-## CSS Baru di `src/index.css`
-
-```text
-.dot-matrix-text {
-  font-family: "JetBrains Mono", monospace;
-  letter-spacing: -0.05em;
-}
-
-.shadow-soft {
-  box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.05);
-}
-
-.dashboard-grid {
-  display: grid;
-  grid-template-columns: 1fr 1.5fr 1fr;
-  gap: 1.5rem;
-}
-
-@media (max-width: 1024px) {
-  .dashboard-grid {
-    grid-template-columns: 1fr;
+// Sebelum: hardcoded eskalasi
+// Sesudah: baca cfg.no_rag_action
+const noRagAction = cfg.no_rag_action || "escalate";
+if (contextChunks.length === 0) {
+  if (noRagAction === "escalate") {
+    await escalateToHuman(...);
+  } else if (noRagAction === "answer_without") {
+    // Lanjut ke AI tanpa context (context = "")
+  } else if (noRagAction === "custom_message") {
+    const msg = cfg.no_rag_message || "Maaf, saya belum bisa menjawab.";
+    await sendWhatsAppMessage(phoneNumber, msg, instanceName);
+    await supabaseAdmin.from("wa_messages").insert({...});
+    return ...;
   }
 }
-
-.custom-scrollbar::-webkit-scrollbar {
-  width: 4px;
-}
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
-}
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: currentColor;
-  opacity: 0.3;
-}
 ```
+
+b) **Escalation Message** (line 610):
+```
+// Sebelum: hardcoded
+const escalationMsg = "Mohon tunggu kak...";
+// Sesudah: baca dari config
+const escalationMsg = (cfg.escalation_message || "Mohon tunggu kak, saya sedang menyambungkan dengan Admin kami. 🙏").replace(/^"|"$/g, "");
+```
+
+c) **Escalation Keyword** (line 537):
+```
+// Sebelum: hardcoded "ESKALASI_HUMAN"
+// Sesudah:
+const escalationKeyword = cfg.escalation_keyword || "ESKALASI_HUMAN";
+if (answer.includes(escalationKeyword)) { ... }
+```
+
+d) **History Length** (line 401):
+```
+// Sebelum: hardcoded .limit(10)
+const historyLength = parseInt(cfg.history_length || "10");
+.limit(historyLength)
+```
+
+e) **History Char Limit** (line 404):
+```
+const charLimit = parseInt(cfg.history_char_limit || "3000");
+const trimmedMessages = trimHistoryByCharLimit(historyMessages, charLimit);
+```
+
+f) **RAG Result Count** (line 415):
+```
+const ragLimit = parseInt(cfg.rag_result_count || "3");
+p_limit: ragLimit,
+```
+
+g) **Sector Detection Toggle** (line 408):
+```
+const useSectorDetection = cfg.sector_detection !== "false";
+const roleTag = useSectorDetection && searchText ? detectSector(searchText) : null;
+```
+
+---
+
+### 3. Setting Keys Baru di `platform_settings`
+
+| Key | Default | Deskripsi |
+|-----|---------|-----------|
+| `no_rag_action` | `"escalate"` | Aksi jika tidak ada RAG context |
+| `no_rag_message` | `""` | Pesan custom jika no_rag_action = custom_message |
+| `escalation_keyword` | `"ESKALASI_HUMAN"` | Kata kunci trigger eskalasi dari AI |
+| `escalation_message` | `"Mohon tunggu kak..."` | Pesan ke customer saat eskalasi (sudah ada, belum dipakai) |
+| `history_length` | `"10"` | Jumlah pesan history ke AI |
+| `history_char_limit` | `"3000"` | Batas karakter history |
+| `rag_result_count` | `"3"` | Jumlah chunk RAG yang dicari |
+| `sector_detection` | `"true"` | Toggle deteksi sektor WAREHOUSE/OWNER |
+
+Tidak perlu migrasi SQL karena `platform_settings` adalah key-value store -- setting baru otomatis tersimpan saat admin save.
 
 ---
 
@@ -160,34 +157,18 @@ export function useTokenUsageToday() {
 
 | File | Aksi |
 |------|------|
-| `src/pages/admin/Dashboard.tsx` | Rewrite total -- layout NEURAL OS + semua widget baru |
-| `src/hooks/useAdminData.ts` | Tambah `useDashboardLogs()` + `useTokenUsageToday()` |
-| `src/index.css` | Tambah utility classes (dot-matrix-text, shadow-soft, dashboard-grid, custom-scrollbar) |
+| `src/pages/admin/Settings.tsx` | Rombak tab "AI Configuration" -- tambah Section B (Behavior) dan C (Context & Memory) |
+| `supabase/functions/wa-webhook/index.ts` | Baca semua config baru dari `cfg`, ganti hardcoded values |
 
----
+## Yang TIDAK Diubah
 
-## Apa yang BISA vs TIDAK BISA Ditampilkan
-
-| Metric | Bisa? | Sumber |
-|--------|-------|--------|
-| Active clients | Ya | `clients` table |
-| Messages today | Ya | `message_logs` table |
-| Token usage today | Ya | `message_logs.token_usage` |
-| Quota usage % | Ya | `clients.quota_remaining / quota_limit` |
-| WA session status | Ya | `wa_sessions` table |
-| Evolution API status | Ya | `platform_settings` |
-| Knowledge base docs | Ya | `documents` table |
-| Real-time activity log | Ya | `wa_messages` + `billing_alerts` + `wa_conversations` |
-| VPS CPU/RAM | Tidak | Lovable Cloud tidak expose metrics ini |
-| Network bandwidth | Tidak | Tidak ada data source |
-
-Sebagai pengganti VPS metrics, kita tampilkan **operational throughput** (message rate, token burn, session uptime) yang lebih relevan untuk SaaS monitoring.
-
----
+- Database schema (tidak perlu migrasi)
+- Hooks (`useAdminData.ts`)
+- Sidebar, layout, dashboard
 
 ## Urutan Implementasi
 
-1. Tambah CSS utilities di `index.css`
-2. Tambah hooks baru di `useAdminData.ts`
-3. Rewrite `Dashboard.tsx` dengan layout + widget baru
+1. Update `wa-webhook/index.ts` -- baca semua config baru dengan fallback ke default
+2. Update `Settings.tsx` -- tambah UI controls untuk semua config baru
+3. Deploy edge function
 
