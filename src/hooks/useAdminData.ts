@@ -323,6 +323,107 @@ export function useAdminUsers() {
   });
 }
 
+// ── Token usage today (for Dashboard) ──
+export function useTokenUsageToday() {
+  return useQuery({
+    queryKey: ["tokenUsageToday"],
+    queryFn: async () => {
+      const today = new Date().toISOString().split("T")[0];
+      const { data } = await supabase
+        .from("message_logs" as any)
+        .select("token_usage")
+        .eq("log_date", today);
+      return ((data as any[]) || []).reduce((sum: number, r: any) => sum + (r.token_usage || 0), 0) as number;
+    },
+    staleTime: 30_000,
+  });
+}
+
+// ── Dashboard system logs (for Dashboard) ──
+export function useDashboardLogs() {
+  return useQuery({
+    queryKey: ["dashboardLogs"],
+    queryFn: async () => {
+      const [messagesRes, alertsRes, escalationsRes] = await Promise.all([
+        // Latest 5 messages with conversation -> customer + client info
+        supabase
+          .from("wa_messages" as any)
+          .select("id, content, sender, created_at, conversation_id")
+          .order("created_at", { ascending: false })
+          .limit(5),
+        // Latest 3 unread billing alerts
+        supabase
+          .from("billing_alerts" as any)
+          .select("id, message, alert_type, created_at, client_id, is_read")
+          .eq("is_read", false)
+          .order("created_at", { ascending: false })
+          .limit(3),
+        // Active human escalations
+        supabase
+          .from("wa_conversations" as any)
+          .select("id, customer_id, client_id, created_at")
+          .eq("handled_by", "HUMAN")
+          .eq("status", "active"),
+      ]);
+
+      const logs: { level: "info" | "warn" | "critical"; message: string; timestamp: string }[] = [];
+
+      // Process messages
+      for (const msg of (messagesRes.data as any[]) || []) {
+        logs.push({
+          level: "info",
+          message: `[MSG] ${msg.sender === "customer" ? "Incoming" : "Outgoing"}: "${(msg.content || "").slice(0, 60)}${(msg.content || "").length > 60 ? "..." : ""}"`,
+          timestamp: msg.created_at,
+        });
+      }
+
+      // Process billing alerts
+      for (const alert of (alertsRes.data as any[]) || []) {
+        logs.push({
+          level: "warn",
+          message: `[WARN] ${alert.message}`,
+          timestamp: alert.created_at,
+        });
+      }
+
+      // Process escalations
+      for (const esc of (escalationsRes.data as any[]) || []) {
+        logs.push({
+          level: "critical",
+          message: `[CRITICAL] Eskalasi menunggu admin — Conv #${(esc.id as string).slice(0, 8)}`,
+          timestamp: esc.created_at,
+        });
+      }
+
+      // Sort by timestamp desc
+      logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+      return logs;
+    },
+    staleTime: 15_000,
+    refetchInterval: 15_000,
+  });
+}
+
+// ── Knowledge Base doc count (for Dashboard) ──
+export function useDocumentStats() {
+  return useQuery({
+    queryKey: ["documentStats"],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("documents" as any)
+        .select("id, status")
+        .eq("chunk_index", 0);
+      const docs = (data as any[]) || [];
+      return {
+        total: docs.length,
+        ready: docs.filter((d: any) => d.status === "ready").length,
+      };
+    },
+    staleTime: 60_000,
+  });
+}
+
 // ── Documents (for KnowledgeBase) ──
 export function useDocuments(filterClientId: string, clients: { id: string; name: string }[]) {
   return useQuery({
