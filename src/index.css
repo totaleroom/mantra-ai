@@ -97,3 +97,36 @@
     scroll-behavior: smooth;
   }
 }
+
+/* Dashboard NEURAL OS utilities */
+.dot-matrix-text {
+  font-family: "JetBrains Mono", monospace;
+  letter-spacing: -0.05em;
+}
+
+.shadow-soft {
+  box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.05);
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.5fr 1fr;
+  gap: 1.5rem;
+}
+
+@media (max-width: 1024px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: currentColor;
+  opacity: 0.3;
+}
