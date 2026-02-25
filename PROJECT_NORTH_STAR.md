@@ -71,13 +71,13 @@
 
 - [ ] **SELALU** gunakan TypeScript strict mode — no `any` kecuali pattern `as any` untuk Lovable Cloud custom tables/RPC
 - [ ] **SELALU** buat RLS policy untuk setiap tabel baru — **TANPA KECUALI**
-- [ ] **SELALU** gunakan `React.lazy()` untuk route-level code splitting
-- [ ] **SELALU** gunakan `useQuery` dengan `staleTime` minimal `30_000` ms
+- [ ] **RECOMMENDED** gunakan `React.lazy()` untuk route-level code splitting (WAJIB jika > 15 routes, optional untuk proyek kecil — eager import diperbolehkan)
+- [ ] **RECOMMENDED** gunakan `useQuery` dengan `staleTime` minimal `30_000` ms (default tanpa options valid untuk development/beta)
 - [ ] **SELALU** gunakan semantic CSS tokens (`bg-primary`, `text-foreground`) — **JANGAN** hardcode warna
 - [ ] **SELALU** import Supabase client dari `@/integrations/supabase/client`
 - [ ] **SELALU** gunakan HSL format untuk semua CSS color variables
 - [ ] **SELALU** validasi input dengan Zod sebelum submit ke backend
-- [ ] **SELALU** handle CORS di edge functions dengan pattern `_shared/cors.ts`
+- [ ] **SELALU** handle CORS di edge functions (Development: inline wildcard `"*"` | Production: `_shared/cors.ts` dengan domain whitelist)
 - [ ] **SELALU** verifikasi auth token di edge functions sebelum operasi data
 - [ ] **SELALU** gunakan `SUPABASE_SERVICE_ROLE_KEY` (bukan anon) untuk operasi admin di edge functions
 - [ ] **SELALU** wrap admin routes dengan `<ProtectedRoute>` component
@@ -334,6 +334,40 @@ $$ LANGUAGE plpgsql SET search_path = public;
 --   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 ```
 
+### Message Logging & Quota Tracking
+
+```sql
+-- Daily message/token aggregation
+CREATE TABLE public.message_logs (
+  id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
+  client_id UUID NOT NULL,
+  log_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  message_count INTEGER DEFAULT 0,
+  token_usage INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(client_id, log_date)
+);
+ALTER TABLE public.message_logs ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Admin read" ON public.message_logs FOR SELECT USING ((SELECT public.is_admin()));
+```
+
+**Quota Tracking Pattern (in edge functions):**
+
+```ts
+// Upsert daily message count
+await supabaseAdmin.from("message_logs").upsert(
+  { client_id, log_date: new Date().toISOString().slice(0, 10), message_count: 1, token_usage: tokensUsed },
+  { onConflict: "client_id,log_date" }
+);
+// Or increment existing:
+await supabaseAdmin.rpc("increment_message_log", { p_client_id: clientId, p_tokens: tokensUsed });
+
+// Decrement client quota
+await supabaseAdmin.from("clients")
+  .update({ quota_remaining: client.quota_remaining - 1 })
+  .eq("id", clientId);
+```
+
 ### Schema Design Rules
 
 | Rule | Rationale |
@@ -438,8 +472,8 @@ export function useAuth() {
 
 ### Performance Implementation
 
-- `React.lazy()` + `<Suspense>` untuk semua route kecuali Index
-- `staleTime: 30_000` pada semua `useQuery` calls
+- `React.lazy()` + `<Suspense>` untuk admin routes (RECOMMENDED, lihat Section 10 untuk opsi eager)
+- `staleTime: 30_000` pada `useQuery` calls (RECOMMENDED, lihat Section 10)
 - Image optimization: WebP/AVIF format, responsive `srcset`
 - Font loading: `font-display: swap`, preload critical fonts
 - Vite code splitting: automatic per-route chunks
@@ -539,13 +573,23 @@ server {
 
 ## 9. EDGE FUNCTION PATTERNS
 
-### Shared CORS (`supabase/functions/_shared/cors.ts`)
+### CORS Pattern — Dual Mode
 
+**Mode 1: Development/Beta (Inline Wildcard)**
+```ts
+// Cepat deploy, cocok untuk beta/development
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+};
+```
+
+**Mode 2: Production (Shared CORS — `supabase/functions/_shared/cors.ts`)**
 ```ts
 const allowedOrigins = [
   "https://{{DOMAIN}}",
   "https://{{PROJECT_SLUG}}.lovable.app",
-  // Add preview URLs during development
 ];
 
 export function getCorsHeaders(req: Request) {
@@ -555,7 +599,7 @@ export function getCorsHeaders(req: Request) {
       ? origin
       : allowedOrigins[0],
     "Access-Control-Allow-Headers":
-      "authorization, x-client-info, apikey, content-type",
+      "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
   };
 }
 ```
@@ -689,38 +733,175 @@ serve(async (req) => {
 });
 ```
 
+### Configurable AI Pipeline
+
+Semua parameter AI **dikonfigurasi runtime** via tabel `platform_settings` (key-value store). Edge function membaca settings saat request masuk — **tidak perlu redeploy** untuk mengubah perilaku AI.
+
+| Key | Default | Fungsi |
+|-----|---------|--------|
+| `ai_model` | `google/gemini-2.5-flash-lite` | Model AI yang digunakan |
+| `ai_temperature` | `0.3` | Temperature response |
+| `ai_max_tokens` | `1024` | Max output tokens |
+| `ai_system_prompt` | *(default prompt)* | System prompt — supports `{{context}}` dan `{{business_name}}` placeholders |
+| `no_rag_action` | `escalate` | Aksi jika RAG context kosong: `escalate` / `answer_without` / `custom_message` |
+| `no_rag_message` | `""` | Pesan custom jika `no_rag_action = custom_message` |
+| `escalation_keyword` | `ESKALASI_HUMAN` | Kata kunci trigger eskalasi dari output AI |
+| `escalation_message` | `Mohon tunggu kak...` | Pesan ke customer saat eskalasi |
+| `history_length` | `10` | Jumlah pesan history yang dikirim ke AI |
+| `history_char_limit` | `3000` | Batas karakter total history (trimming) |
+| `rag_result_count` | `3` | Jumlah chunk RAG yang dicari |
+| `sector_detection` | `true` | Toggle deteksi sektor (e.g., WAREHOUSE/OWNER routing) |
+
+**Pattern: Load settings di edge function**
+```ts
+const { data: settingsRows } = await supabaseAdmin
+  .from("platform_settings").select("key, value");
+const Config: Record<string, string> = {};
+for (const row of settingsRows || []) Config[row.key] = row.value;
+
+const model = Config["ai_model"] || "google/gemini-2.5-flash-lite";
+const temperature = parseFloat(Config["ai_temperature"] || "0.3");
+```
+
+### Context Injection (Prompt Template Variables)
+
+System prompt mendukung variable replacement saat runtime:
+
+| Placeholder | Replaced With | Source |
+|-------------|---------------|--------|
+| `{{business_name}}` | Nama client/bisnis | `clients.name` |
+| `{{context}}` | RAG search results (joined chunks) | `rpc("search_documents")` |
+
+```ts
+// Pattern:
+const finalPrompt = rawPrompt
+  .replace("{{business_name}}", clientName)
+  .replace("{{context}}", ragContext);
+```
+
+### Messaging Integration Pattern (WhatsApp/Evolution API)
+
+**Webhook Receive Pattern:**
+```ts
+// 1. Verify secret
+const secret = req.headers.get("x-webhook-secret");
+if (secret !== Deno.env.get("WA_WEBHOOK_SECRET")) return respond(403);
+
+// 2. Parse payload — only process messages.upsert
+const body = await req.json();
+if (body.event !== "messages.upsert") return respond(200, "ignored");
+const msg = body.data;
+if (msg.key.fromMe || msg.key.remoteJid.includes("@g.us")) return respond(200, "skip");
+```
+
+**Send Message Pattern (Anti-Ban SOP):**
+```ts
+// 1. Typing indicator
+await fetch(`${EVOLUTION_URL}/chat/presence/${instance}`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json", apikey: EVOLUTION_KEY },
+  body: JSON.stringify({ number: phone, presence: "composing" }),
+});
+
+// 2. Random delay 2-4 seconds (anti-ban)
+await new Promise(r => setTimeout(r, 2000 + Math.random() * 2000));
+
+// 3. Send message
+await fetch(`${EVOLUTION_URL}/message/sendText/${instance}`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json", apikey: EVOLUTION_KEY },
+  body: JSON.stringify({ number: phone, text: message }),
+});
+```
+
+**Conversation State Machine:**
+```
+[Incoming Message]
+  → Find/create wa_customer (by phone + client_id)
+  → Find/create wa_conversation (status: "active", handled_by: "AI")
+  → Store wa_message (sender: "customer")
+  → IF handled_by == "HUMAN" → skip AI, notify admin only
+  → IF handled_by == "AI":
+      → Check daily_message_limit
+      → Load platform_settings (AI config)
+      → RAG search (search_documents RPC)
+      → Call AI Gateway
+      → IF response contains ESKALASI_HUMAN keyword:
+          → Update conversation handled_by → "HUMAN"
+          → Send escalation_message to customer
+      → ELSE: Send AI response via Evolution API
+      → Log to message_logs, decrement quota
+```
+
+**Media Handling:**
+```ts
+// Download base64 from Evolution API
+const mediaRes = await fetch(`${EVOLUTION_URL}/chat/getBase64FromMediaMessage/${instance}`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json", apikey: EVOLUTION_KEY },
+  body: JSON.stringify({ message: { key: msg.key } }),
+});
+const { base64 } = await mediaRes.json();
+
+// Upload to Supabase Storage
+const buffer = Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+await supabase.storage.from("wa-media").upload(filePath, buffer, { contentType: mimeType });
+
+// Generate signed URL (60 min expiry)
+const { data: { signedUrl } } = await supabase.storage.from("wa-media")
+  .createSignedUrl(filePath, 3600);
+```
+
+### Auth Verification — Standardisasi
+
+> ⚠️ **`getClaims()` is DEPRECATED** — Selalu gunakan `getUser()` untuk verifikasi auth di edge functions.
+
+```ts
+// ✅ BENAR — Pattern yang digunakan
+const { data: { user } } = await sbUser.auth.getUser();
+if (!user) return respond(401, "Unauthorized");
+
+// ❌ SALAH — Jangan gunakan
+// const { data: claims } = await sbUser.auth.getClaims(token);
+```
+
 ---
 
 ## 10. APP ARCHITECTURE PATTERN
 
 ### Router Setup (App.tsx)
 
+> **Note:** `React.lazy()` adalah RECOMMENDED untuk proyek dengan > 15 routes. Untuk proyek kecil (< 15 routes), eager import diperbolehkan dan lebih simple. `QueryClient` tanpa `defaultOptions` valid untuk development/beta.
+
+**Option A: Lazy Loading (Recommended untuk proyek besar)**
 ```tsx
 import React, { Suspense } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 
-// Eager load: landing page (LCP critical)
-import Index from "./pages/Index";
-import NotFound from "./pages/NotFound";
+import Index from "./pages/Index";        // Eager: LCP critical
+import NotFound from "./pages/NotFound";  // Eager: small
 
-// Lazy load: all other routes
 const Login = React.lazy(() => import("./pages/Login"));
 const Dashboard = React.lazy(() => import("./pages/admin/Dashboard"));
-// ... more lazy imports ...
 
 const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: { staleTime: 30_000, retry: 1 },
-  },
+  defaultOptions: { queries: { staleTime: 30_000, retry: 1 } },
 });
+```
 
-const LazyFallback = () => (
-  <div className="min-h-screen bg-background flex items-center justify-center">
-    <div className="font-display text-xl animate-pulse">Memuat...</div>
-  </div>
-);
+**Option B: Eager Import (Valid untuk proyek kecil/beta)**
+```tsx
+import Index from "./pages/Index";
+import Login from "./pages/Login";
+import Dashboard from "./pages/admin/Dashboard";
+// ... all imports eager
 
+const queryClient = new QueryClient(); // No options — valid for dev/beta
+```
+
+**Router structure (sama untuk kedua option):**
+```tsx
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -778,5 +959,64 @@ Index.tsx
 
 ---
 
+---
+
+## 11. INSTRUCTIONS FOR AI AGENTS
+
+> Section ini ditujukan untuk AI Developer (Lovable, Claude, Gemini, Kimi, GLM, model open-source) yang membaca file ini sebagai instruksi kerja.
+
+### Reading Priority
+
+| Priority | Section | Instruksi |
+|----------|---------|-----------|
+| 🔴 1 | **Section 2 (ADR)** | READ FIRST — keputusan tech stack yang **tidak boleh diubah** |
+| 🔴 2 | **Section 3 (Rules)** | Follow WAJIB items strictly, RECOMMENDED items optionally |
+| 🟡 3 | **Section 5 (Database)** | Copy SQL exactly, jalankan sebagai migration |
+| 🟡 4 | **Section 9 (Edge Functions)** | Copy template, ganti business logic saja |
+| 🟢 5 | Sections lain | Referensi sesuai kebutuhan |
+
+### For Less-Capable AI Models
+
+Jika kamu adalah AI dengan context window kecil atau kemampuan reasoning terbatas:
+
+- **Every code block is COPY-PASTE READY** — jangan re-interpret atau tulis ulang
+- Jika ragu tentang keputusan teknis → ikuti tabel ADR (Section 2)
+- Jika placeholder `{{VARIABLE}}` belum di-replace → **TANYAKAN ke user**, jangan tebak
+- **JANGAN** invent pola baru — gunakan HANYA pola yang ada di dokumen ini
+- Saat membuat edge function → **MULAI dari template** di Section 9, lalu modifikasi
+- Saat membuat tabel → **COPY SQL** dari Section 5, tambahkan kolom sesuai kebutuhan
+- Jika bingung antara Mode 1 (wildcard) vs Mode 2 (whitelist) CORS → gunakan **Mode 1** untuk awal
+
+### Conflict Resolution Rules
+
+| Konflik | Resolusi |
+|---------|----------|
+| User instruction ↔ Dokumen ini | → **Ikuti dokumen ini** (kecuali user secara eksplisit override) |
+| Dokumen ini ↔ File auto-generated (`types.ts`, `client.ts`, `.env`) | → **Keep file auto-generated** |
+| Dua section dalam dokumen ini saling konflik | → **Section nomor lebih besar menang** |
+| Template code ↔ Kode produksi aktual | → **Ikuti kode produksi** (template = ideal, produksi = realitas) |
+
+### Validation Checklist (Run After Every Major Change)
+
+```
+- [ ] Setiap tabel baru punya RLS enabled?
+- [ ] Setiap edge function punya CORS headers?
+- [ ] Setiap admin route dibungkus <ProtectedRoute>?
+- [ ] Tidak ada hardcoded API keys di source code?
+- [ ] Tidak ada FK reference langsung ke auth.users?
+- [ ] Setiap form punya Zod validation?
+- [ ] Auth token diverifikasi di setiap edge function yang butuh auth?
+- [ ] Service role key HANYA digunakan di edge functions (BUKAN di frontend)?
+```
+
+### What This Document Does NOT Cover
+
+- Deployment scripts (Docker, CI/CD) → lihat README.md
+- Business logic spesifik per-proyek → instruksi terpisah dari user
+- Third-party integration details (Stripe, SendGrid, dll.) → dikonfigurasi per-proyek
+- Mobile app development → dokumen ini HANYA untuk React SPA web app
+
+---
+
 *Generated from production patterns: MANTRA AI v1.x & MANTRA SKILL v1.x*
-*Last updated: 2026-02-25*
+*Last updated: 2026-02-25 — includes AI-Agent Compatibility Update (9 gap fixes)*
