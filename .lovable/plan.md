@@ -1,174 +1,126 @@
 
 
-# AI Configuration Transparency & Behavior Pipeline
+# PROJECT_NORTH_STAR.md — Enterprise SaaS Replication Template
 
-## Masalah
+## Objective
 
-Banyak perilaku kritis AI yang hardcoded di `wa-webhook/index.ts` dan tidak bisa diubah tanpa edit kode. Admin tidak tahu apa yang terjadi "di balik layar" ketika AI merespon.
+Membuat file `PROJECT_NORTH_STAR.md` yang berfungsi sebagai **Single Source of Truth** untuk menduplikasi sistem SaaS enterprise. File ini dirancang agar AI Developer (Lovable, Claude, Gemini, Kimi, GLM) bisa membaca satu dokumen dan langsung membangun tanpa banyak bertanya.
 
-## Solusi: Enhanced AI Settings + Webhook Update
+## Kenapa Ini Penting
 
-Daripada membangun sistem node visual seperti n8n (yang membutuhkan ratusan jam development), kita buat **AI Behavior Configuration** yang transparan di halaman Settings -- semua parameter yang mengontrol perilaku AI bisa dilihat dan diubah oleh admin.
+- Menghemat **ratusan ribu token** per proyek baru (tidak perlu instruksi berulang)
+- Menghilangkan back-and-forth revisi untuk keputusan arsitektur yang sudah final
+- Menjadi blueprint yang bisa di-fork untuk setiap proyek baru
+
+## Struktur Dokumen
+
+Template akan memiliki **9 section utama** dalam format token-efficient (tabel + list, minim paragraf naratif):
+
+### Section 1: Project Identity (Placeholder Variables)
+Semua variabel yang di-replace saat proyek baru dimulai:
+- `{{PROJECT_NAME}}`, `{{PROJECT_SLUG}}`, `{{DOMAIN}}`
+- `{{PRIMARY_COLOR}}`, `{{ACCENT_COLOR}}`, `{{FONT_HEADING}}`, `{{FONT_BODY}}`
+- `{{DESIGN_STYLE}}` (Industrial Minimalist / Glassmorphism / Neo-Brutalist / Corporate Clean)
+- `{{INDUSTRY}}`, `{{TARGET_USER}}`, `{{MONETIZATION_MODEL}}`
+
+### Section 2: Architecture Decision Records (ADR)
+Tabel keputusan tech stack final yang tidak boleh diubah AI:
+
+| Layer | Decision | Rationale |
+|-------|----------|-----------|
+| Frontend | React 18 + Vite + TypeScript strict | Ecosystem maturity, Lovable native |
+| Styling | Tailwind CSS + shadcn/ui + CSS Variables | Token-based design system |
+| State | TanStack React Query | Server-state caching |
+| Routing | React Router v6 | SPA standard |
+| Backend | Lovable Cloud (Supabase) | Zero-config DB + Auth + Edge Functions |
+| AI Models | Lovable AI (Gemini/GPT via proxy) | No API key required |
+| Auth | Supabase Auth + RBAC via user_roles | Email verification wajib |
+| Storage | Supabase Storage + CDN | File uploads |
+| Deployment | Lovable Cloud (frontend) + Contabo VPS (services) | Cost-optimized |
+
+### Section 3: Implementation Rules (Imperative Commands)
+Perintah tegas untuk AI saat coding -- format checklist:
+- "SELALU gunakan TypeScript strict mode"
+- "JANGAN hardcode API key -- gunakan platform_settings atau edge function secrets"
+- "SELALU buat RLS policy untuk setiap tabel baru"
+- "GUNAKAN `as any` type assertion untuk tabel custom (Lovable Cloud pattern)"
+- "JANGAN edit file auto-generated: client.ts, types.ts, config.toml, .env"
+- "SELALU gunakan React.lazy() untuk route-level code splitting"
+- "GUNAKAN useQuery dengan staleTime minimal 30_000ms"
+- Dan 15+ rules lainnya dari pattern kedua proyek MANTRA
+
+### Section 4: Design System Specification
+- Color token mapping (CSS variables `--primary`, `--accent`, dll.)
+- Typography scale (heading sizes, body, mono)
+- Component patterns (Card, Badge, Button variants yang konsisten)
+- Dark mode support via `darkMode: ["class"]`
+- Responsive breakpoints (mobile-first, sm/md/lg/xl/2xl)
+- WCAG 2.1 AA accessibility requirements
+
+### Section 5: Database Schema Blueprint
+Template tabel yang selalu ada di setiap proyek enterprise:
+- `user_roles` (RBAC)
+- `platform_settings` (key-value config store)
+- `audit_logs` (audit trail -- BARU, dari requirement GDPR/ISO)
+- `profiles` (extended user data)
+- Pattern: FK ke auth.users via user_id UUID, bukan direct reference
+
+### Section 6: Authentication & Security Checklist
+- Email + password auth dengan email verification (WAJIB)
+- RBAC via `user_roles` table + `is_admin()` RPC
+- RLS policies on ALL tables
+- Honeypot anti-bot pada forms
+- Input validation via Zod
+- CORS headers pada edge functions
+- Audit trail logging pattern
+- Encryption standards
+
+### Section 7: SEO & Performance Requirements
+- Meta tags + Open Graph + JSON-LD structured data
+- robots.txt + sitemap.xml
+- Target: TTI < 2s, LCP < 2.5s, CLS < 0.1
+- Lazy loading images + route-level code splitting
+- Gzip compression config (Nginx)
+
+### Section 8: Folder Structure Convention
+Template folder structure yang konsisten:
+```
+src/
+  components/
+    admin/      -- Dashboard components
+    landing/    -- Public-facing components
+    ui/         -- shadcn/ui (auto-managed)
+  hooks/        -- Custom hooks (useAuth, useAdminData)
+  pages/
+    admin/      -- Protected admin routes
+  integrations/ -- Auto-generated backend client
+  lib/          -- Utilities
+supabase/
+  functions/    -- Edge functions
+  migrations/   -- SQL migrations
+```
+
+### Section 9: Edge Function Patterns
+Template untuk edge function standard:
+- CORS headers pattern
+- Auth token validation pattern
+- Admin gate via `is_admin()` RPC
+- Service role client pattern
+- Error handling + logging
 
 ---
 
-## Kenapa BUKAN n8n-style Node Editor
-
-| Aspek | n8n-style Nodes | AI Behavior Config |
-|-------|----------------|-------------------|
-| Development time | 200+ jam (drag-drop, canvas, node types) | 8-10 jam |
-| Maintenance | Sangat kompleks | Minimal |
-| User skill needed | Perlu pemahaman teknis | Form sederhana |
-| Fleksibilitas | Sangat tinggi | Cukup untuk 95% use case |
-| Risk | Over-engineering | Pragmatis |
-
-Jika nanti kebutuhan benar-benar memerlukan visual pipeline, bisa diintegrasikan dengan n8n yang sudah ada (via MCP connector) daripada membangun ulang dari nol.
-
----
-
-## Perubahan Detail
-
-### 1. Settings UI (`src/pages/admin/Settings.tsx`)
-
-Rombak tab "AI Configuration" menjadi lebih komprehensif dengan 3 section:
-
-**Section A: Model & Prompt (sudah ada, diperbaiki)**
-- Model selector (sudah ada)
-- Temperature slider (sudah ada)
-- Max tokens (sudah ada)
-- System prompt + presets (sudah ada)
-- BARU: **Context injection mode** -- dropdown: "Append to prompt" / "Replace {{context}} placeholder"
-- BARU: **Business name override** -- input text (saat ini selalu pakai `clients.name`)
-
-**Section B: AI Behavior Pipeline (BARU)**
-Tampilan visual sederhana yang menunjukkan alur keputusan AI:
-
-```
-[Pesan Masuk] --> [Cek RAG Context] --> [Ada?]
-                                          |
-                                     Ya --+--> [Kirim ke AI + Context]
-                                          |
-                                     Tidak -> [??? Configurable]
-```
-
-Setting yang bisa diubah:
-- **No-RAG Fallback Action** -- dropdown:
-  - "Eskalasi ke admin" (default saat ini)
-  - "Jawab tanpa context" (AI tetap jawab tapi tanpa RAG)
-  - "Kirim pesan custom" (admin tulis pesan fallback sendiri)
-- **No-RAG Fallback Message** -- textarea (muncul jika pilih "Kirim pesan custom")
-- **Escalation Keyword** -- input text (default: "ESKALASI_HUMAN", bisa diganti)
-- **Escalation Message** -- textarea (sudah ada settingnya tapi belum dipakai di webhook!)
-
-**Section C: Context & Memory (BARU)**
-- **History Length** -- slider 1-20 (default: 10) -- berapa pesan terakhir dikirim ke AI
-- **History Char Limit** -- input number (default: 3000) -- batas karakter untuk trimming
-- **RAG Result Count** -- input number 1-10 (default: 3) -- berapa chunk dokumen dicari
-- **Sector Detection** -- toggle on/off (default: on) -- apakah pakai deteksi sektor WAREHOUSE/OWNER
-
----
-
-### 2. Webhook Update (`supabase/functions/wa-webhook/index.ts`)
-
-Update webhook untuk membaca semua config baru dari `platform_settings` (tabel `cfg` sudah di-load di line 292-298):
-
-**Perubahan spesifik:**
-
-a) **No-RAG Fallback** (line 444-449):
-```
-// Sebelum: hardcoded eskalasi
-// Sesudah: baca cfg.no_rag_action
-const noRagAction = cfg.no_rag_action || "escalate";
-if (contextChunks.length === 0) {
-  if (noRagAction === "escalate") {
-    await escalateToHuman(...);
-  } else if (noRagAction === "answer_without") {
-    // Lanjut ke AI tanpa context (context = "")
-  } else if (noRagAction === "custom_message") {
-    const msg = cfg.no_rag_message || "Maaf, saya belum bisa menjawab.";
-    await sendWhatsAppMessage(phoneNumber, msg, instanceName);
-    await supabaseAdmin.from("wa_messages").insert({...});
-    return ...;
-  }
-}
-```
-
-b) **Escalation Message** (line 610):
-```
-// Sebelum: hardcoded
-const escalationMsg = "Mohon tunggu kak...";
-// Sesudah: baca dari config
-const escalationMsg = (cfg.escalation_message || "Mohon tunggu kak, saya sedang menyambungkan dengan Admin kami. 🙏").replace(/^"|"$/g, "");
-```
-
-c) **Escalation Keyword** (line 537):
-```
-// Sebelum: hardcoded "ESKALASI_HUMAN"
-// Sesudah:
-const escalationKeyword = cfg.escalation_keyword || "ESKALASI_HUMAN";
-if (answer.includes(escalationKeyword)) { ... }
-```
-
-d) **History Length** (line 401):
-```
-// Sebelum: hardcoded .limit(10)
-const historyLength = parseInt(cfg.history_length || "10");
-.limit(historyLength)
-```
-
-e) **History Char Limit** (line 404):
-```
-const charLimit = parseInt(cfg.history_char_limit || "3000");
-const trimmedMessages = trimHistoryByCharLimit(historyMessages, charLimit);
-```
-
-f) **RAG Result Count** (line 415):
-```
-const ragLimit = parseInt(cfg.rag_result_count || "3");
-p_limit: ragLimit,
-```
-
-g) **Sector Detection Toggle** (line 408):
-```
-const useSectorDetection = cfg.sector_detection !== "false";
-const roleTag = useSectorDetection && searchText ? detectSector(searchText) : null;
-```
-
----
-
-### 3. Setting Keys Baru di `platform_settings`
-
-| Key | Default | Deskripsi |
-|-----|---------|-----------|
-| `no_rag_action` | `"escalate"` | Aksi jika tidak ada RAG context |
-| `no_rag_message` | `""` | Pesan custom jika no_rag_action = custom_message |
-| `escalation_keyword` | `"ESKALASI_HUMAN"` | Kata kunci trigger eskalasi dari AI |
-| `escalation_message` | `"Mohon tunggu kak..."` | Pesan ke customer saat eskalasi (sudah ada, belum dipakai) |
-| `history_length` | `"10"` | Jumlah pesan history ke AI |
-| `history_char_limit` | `"3000"` | Batas karakter history |
-| `rag_result_count` | `"3"` | Jumlah chunk RAG yang dicari |
-| `sector_detection` | `"true"` | Toggle deteksi sektor WAREHOUSE/OWNER |
-
-Tidak perlu migrasi SQL karena `platform_settings` adalah key-value store -- setting baru otomatis tersimpan saat admin save.
-
----
-
-## File yang Diubah
+## File yang Dibuat
 
 | File | Aksi |
 |------|------|
-| `src/pages/admin/Settings.tsx` | Rombak tab "AI Configuration" -- tambah Section B (Behavior) dan C (Context & Memory) |
-| `supabase/functions/wa-webhook/index.ts` | Baca semua config baru dari `cfg`, ganti hardcoded values |
+| `PROJECT_NORTH_STAR.md` | File Markdown baru di root project, siap commit ke GitHub |
 
-## Yang TIDAK Diubah
+## Technical Notes
 
-- Database schema (tidak perlu migrasi)
-- Hooks (`useAdminData.ts`)
-- Sidebar, layout, dashboard
-
-## Urutan Implementasi
-
-1. Update `wa-webhook/index.ts` -- baca semua config baru dengan fallback ke default
-2. Update `Settings.tsx` -- tambah UI controls untuk semua config baru
-3. Deploy edge function
+- File akan berukuran sekitar 400-500 baris Markdown
+- Menggunakan format tabel dan checklist (bukan paragraf) untuk efisiensi token
+- Semua placeholder menggunakan format `{{VARIABLE_NAME}}` agar mudah di-search-replace
+- Diextract dari pattern nyata kedua proyek MANTRA AI dan MANTRA SKILL
+- Termasuk ADR sehingga AI tidak perlu menebak tech stack
 
