@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.manage-settings]
 verify_jwt = false
+
+[functions.manage-wa-instance]
+verify_jwt = false

@@ -338,6 +338,7 @@ export type Database = {
           client_id: string
           created_at: string
           id: string
+          instance_name: string | null
           qr_code: string | null
           status: string
           updated_at: string
@@ -346,6 +347,7 @@ export type Database = {
           client_id: string
           created_at?: string
           id?: string
+          instance_name?: string | null
           qr_code?: string | null
           status?: string
           updated_at?: string
@@ -354,6 +356,7 @@ export type Database = {
           client_id?: string
           created_at?: string
           id?: string
+          instance_name?: string | null
           qr_code?: string | null
           status?: string
           updated_at?: string
