@@ -195,14 +195,55 @@ serve(async (req) => {
 
     const body = await req.json();
     const event = body.event || body.type;
-    
+    const instanceName = body.instance || body.instanceName;
+
+    const supabaseAdmin = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+    );
+
+    // === Handle CONNECTION_UPDATE ===
+    if (event === "connection.update") {
+      const state = body.data?.state || body.data?.status;
+      console.log("Connection update:", instanceName, state);
+
+      if (instanceName && state) {
+        const dbStatus = state === "open" ? "connected" : "disconnected";
+        await supabaseAdmin
+          .from("wa_sessions")
+          .update({ status: dbStatus, qr_code: dbStatus === "connected" ? null : undefined })
+          .eq("instance_name", instanceName);
+      }
+
+      return new Response(JSON.stringify({ status: "connection_updated", state }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // === Handle QRCODE_UPDATED ===
+    if (event === "qrcode.updated") {
+      const qrCode = body.data?.qrcode?.base64 || body.data?.qrcode?.code || body.data?.qrcode || null;
+      console.log("QR code updated for:", instanceName);
+
+      if (instanceName && qrCode) {
+        await supabaseAdmin
+          .from("wa_sessions")
+          .update({ qr_code: typeof qrCode === "string" ? qrCode : JSON.stringify(qrCode), status: "connecting" })
+          .eq("instance_name", instanceName);
+      }
+
+      return new Response(JSON.stringify({ status: "qr_updated" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // === Only process messages.upsert from here ===
     if (event !== "messages.upsert") {
       return new Response(JSON.stringify({ status: "ignored", event }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const instanceName = body.instance || body.instanceName;
     const messageData = body.data;
     
     if (!messageData) {
@@ -247,28 +288,36 @@ serve(async (req) => {
 
     const pushName = messageData.pushName || "";
 
-    const supabaseAdmin = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
+    // supabaseAdmin already created above for connection/qrcode events
+    // Re-use it here (it was created in the connection.update block but we need it here too)
+    // Actually, supabaseAdmin was created above line 200, so we need to remove duplicate
 
-    // 1. Find client_id from wa_sessions
-    const { data: session } = await supabaseAdmin
+    // 1. Find client_id from wa_sessions (lookup by instance_name first, then fallback)
+    const { data: sessionData } = await supabaseAdmin
       .from("wa_sessions")
       .select("client_id")
-      .eq("id", instanceName)
-      .eq("status", "connected")
+      .eq("instance_name", instanceName)
       .maybeSingle();
 
-    let clientId = session?.client_id;
+    let clientId = sessionData?.client_id;
     if (!clientId) {
-      const { data: sessionByClient } = await supabaseAdmin
+      // Fallback: try by id (legacy)
+      const { data: sessionById } = await supabaseAdmin
+        .from("wa_sessions")
+        .select("client_id")
+        .eq("id", instanceName)
+        .maybeSingle();
+      clientId = sessionById?.client_id;
+    }
+    if (!clientId) {
+      // Last fallback: any connected session
+      const { data: anySession } = await supabaseAdmin
         .from("wa_sessions")
         .select("client_id")
         .eq("status", "connected")
         .limit(1)
         .maybeSingle();
-      clientId = sessionByClient?.client_id;
+      clientId = anySession?.client_id;
     }
 
     if (!clientId) {
