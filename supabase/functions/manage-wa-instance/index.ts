@@ -264,6 +264,87 @@ serve(async (req) => {
       );
     }
 
+    // --- SYNC: Import all instances from Evolution API ---
+    if (action === "sync") {
+      const { client_id } = body;
+      if (!client_id) throw new Error("client_id required");
+
+      // 1. Fetch all instances from Evolution API
+      const fetchRes = await fetch(`${baseUrl}/instance/fetchInstances`, {
+        method: "GET",
+        headers: { apikey: EVOLUTION_API_KEY },
+      });
+      if (!fetchRes.ok) {
+        const errText = await fetchRes.text();
+        throw new Error(`Failed to fetch instances: ${fetchRes.status} - ${errText}`);
+      }
+      const instances = await fetchRes.json();
+
+      // 2. Get existing sessions
+      const { data: existingSessions } = await supabaseAdmin
+        .from("wa_sessions")
+        .select("instance_name");
+      const existingNames = new Set((existingSessions || []).map((s: any) => s.instance_name));
+
+      // 3. Get webhook config
+      const { data: secretRow } = await supabaseAdmin
+        .from("platform_settings")
+        .select("value")
+        .eq("key", "wa_webhook_secret")
+        .maybeSingle();
+      const webhookSecret = secretRow?.value || Deno.env.get("WA_WEBHOOK_SECRET") || "";
+      const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+      const webhookUrl = `${SUPABASE_URL}/functions/v1/wa-webhook`;
+
+      const synced: string[] = [];
+      const existing: string[] = [];
+
+      for (const inst of instances) {
+        const name = inst.name || inst.instanceName;
+        if (!name) continue;
+
+        if (existingNames.has(name)) {
+          existing.push(name);
+        } else {
+          // Insert into wa_sessions
+          await supabaseAdmin.from("wa_sessions").insert({
+            client_id,
+            instance_name: name,
+            status: inst.connectionStatus === "open" ? "connected" : "disconnected",
+            qr_code: null,
+          });
+          synced.push(name);
+        }
+
+        // Set webhook for all instances (synced or existing)
+        try {
+          const whRes = await fetch(`${baseUrl}/webhook/set/${name}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
+            body: JSON.stringify({
+              url: webhookUrl,
+              webhook_by_events: false,
+              webhook_base64: true,
+              headers: { "X-Webhook-Secret": webhookSecret },
+              events: ["MESSAGES_UPSERT", "CONNECTION_UPDATE", "QRCODE_UPDATED"],
+            }),
+          });
+          if (!whRes.ok) {
+            console.warn(`Webhook set warning for ${name}:`, whRes.status, await whRes.text());
+          } else {
+            await whRes.text();
+          }
+        } catch (e) {
+          console.warn(`Webhook set failed for ${name}:`, e);
+        }
+      }
+
+      return new Response(
+        JSON.stringify({ success: true, synced, existing, total: instances.length }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     return new Response(JSON.stringify({ error: "Unknown action" }), {
       status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
