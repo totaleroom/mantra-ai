@@ -12,7 +12,8 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Loader2, Plus, RefreshCw, Server, Trash2 } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Loader2, Plus, RefreshCw, Server, Trash2, Activity, CheckCircle2, XCircle, AlertTriangle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import InstanceCard from "@/components/admin/InstanceCard";
 
@@ -23,8 +24,15 @@ interface WaSession {
   status: string;
   qr_code: string | null;
   instance_name: string | null;
+  last_error?: string | null;
 }
 interface VpsInstance { name: string; status: string; }
+interface HealthCheckResult {
+  evolution_reachable: boolean;
+  instances: VpsInstance[];
+  webhook_status: Record<string, { configured: boolean; url?: string; enabled?: boolean; error?: string }>;
+  errors: string[];
+}
 
 export default function DeviceManager() {
   const [clients, setClients] = useState<Client[]>([]);
@@ -37,16 +45,16 @@ export default function DeviceManager() {
   const [vpsInstances, setVpsInstances] = useState<VpsInstance[] | null>(null);
   const [vpsOpen, setVpsOpen] = useState(false);
   const [deleteAllOpen, setDeleteAllOpen] = useState(false);
+  const [healthCheck, setHealthCheck] = useState<HealthCheckResult | null>(null);
+  const [healthLoading, setHealthLoading] = useState(false);
   const { toast } = useToast();
 
-  // Fetch clients
   useEffect(() => {
     supabase.from("clients" as any).select("id, name").order("name").then(({ data }) => {
       setClients((data as any[] || []) as Client[]);
     });
   }, []);
 
-  // Fetch sessions + realtime subscription
   useEffect(() => {
     if (!selectedClientId) { setSessions([]); return; }
 
@@ -108,6 +116,21 @@ export default function DeviceManager() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
     return data;
+  };
+
+  const handleHealthCheck = async () => {
+    setHealthLoading(true);
+    try {
+      const result = await callManageInstance("health-check", {});
+      setHealthCheck(result);
+      if (!result.evolution_reachable) {
+        toast({ variant: "destructive", title: "Evolution API tidak bisa dijangkau", description: "Periksa VPS dan service Evolution." });
+      }
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Health check gagal", description: e.message });
+    } finally {
+      setHealthLoading(false);
+    }
   };
 
   const handleCreate = async () => {
@@ -178,6 +201,13 @@ export default function DeviceManager() {
       if (action === "delete") {
         await callManageInstance("", { instance_name: instanceNameVal }, "DELETE");
         toast({ title: "Instance dihapus" });
+      } else if (action === "set-webhook") {
+        const result = await callManageInstance("set-webhook", { instance_name: instanceNameVal });
+        if (result.ok) {
+          toast({ title: "Webhook berhasil diperbaiki", description: `Format: ${result.format}` });
+        } else {
+          toast({ variant: "destructive", title: "Webhook gagal diperbaiki", description: result.error || "Unknown error" });
+        }
       } else {
         await callManageInstance(action, { instance_name: instanceNameVal });
         const messages: Record<string, string> = {
@@ -198,6 +228,58 @@ export default function DeviceManager() {
     <div>
       <h1 className="mb-6 text-2xl font-bold text-foreground">Device & Connection</h1>
 
+      {/* Health Check Panel */}
+      <div className="mb-6 rounded-lg border border-border bg-card p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
+            <Activity className="h-4 w-4" /> Kesehatan Integrasi
+          </h2>
+          <Button size="sm" variant="outline" className="gap-2" onClick={handleHealthCheck} disabled={healthLoading}>
+            {healthLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+            Cek Sekarang
+          </Button>
+        </div>
+        {healthCheck ? (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              {healthCheck.evolution_reachable
+                ? <Badge className="gap-1 bg-green-500/20 text-green-700 border-green-500/30"><CheckCircle2 className="h-3 w-3" /> Evolution API Aktif</Badge>
+                : <Badge className="gap-1 bg-destructive/20 text-destructive border-destructive/30"><XCircle className="h-3 w-3" /> Evolution API Tidak Aktif</Badge>
+              }
+              <Badge variant="outline" className="gap-1">
+                <Server className="h-3 w-3" /> {healthCheck.instances.length} instance
+              </Badge>
+            </div>
+            {healthCheck.errors.length > 0 && (
+              <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2">
+                {healthCheck.errors.map((err, i) => (
+                  <p key={i} className="text-xs text-destructive flex items-center gap-1">
+                    <AlertTriangle className="h-3 w-3 shrink-0" /> {err}
+                  </p>
+                ))}
+              </div>
+            )}
+            {Object.entries(healthCheck.webhook_status).length > 0 && (
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground font-medium">Webhook Status:</p>
+                {Object.entries(healthCheck.webhook_status).map(([name, wh]) => (
+                  <div key={name} className="flex items-center gap-2 text-xs">
+                    <code className="text-xs">{name}</code>
+                    {wh.configured && wh.enabled
+                      ? <Badge className="gap-1 text-xs bg-green-500/20 text-green-700 border-green-500/30"><CheckCircle2 className="h-2.5 w-2.5" /> OK</Badge>
+                      : <Badge className="gap-1 text-xs bg-yellow-500/20 text-yellow-700 border-yellow-500/30"><AlertTriangle className="h-2.5 w-2.5" /> {wh.error || "Not configured"}</Badge>
+                    }
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">Klik "Cek Sekarang" untuk memeriksa koneksi Evolution API dan webhook.</p>
+        )}
+      </div>
+
+      {/* Controls */}
       <div className="mb-6 flex items-center gap-3 flex-wrap">
         <div className="max-w-sm flex-1">
           <Select value={selectedClientId} onValueChange={setSelectedClientId}>
@@ -212,28 +294,14 @@ export default function DeviceManager() {
           </Select>
         </div>
 
-        {/* VPS & Global Actions */}
-        <Button
-          size="sm"
-          variant="outline"
-          className="gap-2"
-          onClick={handleFetchVps}
-          disabled={actionLoading === "vps-list"}
-        >
+        <Button size="sm" variant="outline" className="gap-2" onClick={handleFetchVps} disabled={actionLoading === "vps-list"}>
           {actionLoading === "vps-list" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Server className="h-4 w-4" />}
           Lihat Instance VPS
         </Button>
 
         <AlertDialog open={deleteAllOpen} onOpenChange={setDeleteAllOpen}>
-          <Button
-            size="sm"
-            variant="destructive"
-            className="gap-2"
-            onClick={() => setDeleteAllOpen(true)}
-            disabled={!!actionLoading}
-          >
-            <Trash2 className="h-4 w-4" />
-            Hapus Semua
+          <Button size="sm" variant="destructive" className="gap-2" onClick={() => setDeleteAllOpen(true)} disabled={!!actionLoading}>
+            <Trash2 className="h-4 w-4" /> Hapus Semua
           </Button>
           <AlertDialogContent>
             <AlertDialogHeader>
@@ -253,13 +321,7 @@ export default function DeviceManager() {
 
         {selectedClientId && (
           <>
-            <Button
-              size="sm"
-              variant="outline"
-              className="gap-2"
-              onClick={handleSync}
-              disabled={actionLoading === "sync"}
-            >
+            <Button size="sm" variant="outline" className="gap-2" onClick={handleSync} disabled={actionLoading === "sync"}>
               {actionLoading === "sync" ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
               Sync dari VPS
             </Button>
@@ -273,22 +335,13 @@ export default function DeviceManager() {
               <DialogContent>
                 <DialogHeader>
                   <DialogTitle>Buat Instance WhatsApp</DialogTitle>
-                  <DialogDescription>
-                    Masukkan nama instance untuk membuat koneksi WhatsApp baru.
-                  </DialogDescription>
+                  <DialogDescription>Masukkan nama instance untuk membuat koneksi WhatsApp baru.</DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4 py-4">
-                  <Input
-                    placeholder="Nama instance (misal: mantra-bot-1)"
-                    value={instanceName}
-                    onChange={(e) => setInstanceName(e.target.value)}
-                  />
+                  <Input placeholder="Nama instance (misal: mantra-bot-1)" value={instanceName} onChange={(e) => setInstanceName(e.target.value)} />
                 </div>
                 <DialogFooter>
-                  <Button
-                    onClick={handleCreate}
-                    disabled={!instanceName.trim() || actionLoading === "create"}
-                  >
+                  <Button onClick={handleCreate} disabled={!instanceName.trim() || actionLoading === "create"}>
                     {actionLoading === "create" && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     Buat & Dapatkan QR
                   </Button>
