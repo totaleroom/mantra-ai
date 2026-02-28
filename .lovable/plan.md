@@ -1,69 +1,53 @@
 
-# Fix QR Code & Webhook - Evolution API v2 Compatibility
+
+# Perbaikan Device Manager: Delete, Status Constraint, dan UX
 
 ## Masalah yang Ditemukan
 
-Dari log edge function, ada 3 bug yang menyebabkan QR tidak muncul dan webhook tidak terpasang:
+### 1. Database constraint terlalu ketat (penyebab utama error)
+Tabel `wa_sessions` punya CHECK constraint yang hanya mengizinkan status `connected` dan `disconnected`. Tapi kode menggunakan status `connecting` saat create, sync, restart, dan fetch QR -- ini menyebabkan error "violates check constraint" dan semua operasi gagal.
 
-### 1. Format webhook salah (penyebab utama)
-Log: `"instance requires property \"webhook\""`
+### 2. Delete gagal karena crash di edge function
+Saat operasi sebelumnya gagal (karena constraint), edge function crash dan return error 500. Tombol hapus juga tidak punya konfirmasi, jadi mudah salah klik.
 
-Kode saat ini menggunakan field `webhook_by_events` dan `webhook_base64` (format lama), tapi Evolution API v2 menggunakan `enabled`, `webhookByEvents`, `webhookBase64` (camelCase).
+### 3. UX kurang user-friendly
+- Tidak ada konfirmasi sebelum menghapus instance
+- Error message tidak jelas ("failed to fetch")
+- Tidak bisa melihat daftar instance langsung dari VPS
 
-**Payload saat ini (SALAH):**
+## Solusi
+
+### 1. Update database constraint
+Tambah status `connecting` ke daftar status yang diizinkan:
+
 ```text
-{
-  url: "...",
-  webhook_by_events: false,
-  webhook_base64: true,
-  headers: { ... },
-  events: [...]
-}
+ALTER TABLE wa_sessions DROP CONSTRAINT wa_sessions_status_check;
+ALTER TABLE wa_sessions ADD CONSTRAINT wa_sessions_status_check 
+  CHECK (status IN ('connected', 'disconnected', 'connecting'));
 ```
 
-**Payload yang benar (Evolution API v2):**
-```text
-{
-  enabled: true,
-  url: "...",
-  webhookByEvents: false,
-  webhookBase64: true,
-  headers: { ... },
-  events: [...]
-}
-```
+### 2. Tambah action "list" di edge function
+Endpoint baru `POST ?action=list` yang langsung ambil semua instance dari Evolution API tanpa perlu ada di database. Berguna untuk melihat apa saja yang ada di VPS.
 
-### 2. URL encoding untuk nama instance dengan spasi
-Log: `Cannot PUT /instance/restart/Totale%20Bot`
+### 3. Perbaikan UX di DeviceManager
+- Tambah dialog konfirmasi sebelum hapus instance (AlertDialog)
+- Tambah tombol "Lihat Instance VPS" untuk melihat langsung daftar dari Evolution API
+- Error handling yang lebih jelas dengan pesan spesifik
+- Tambah action "Hapus Semua" untuk reset dari awal
 
-Instance bernama "Totale Bot" (dengan spasi) menyebabkan error di beberapa endpoint. Semua URL perlu di-encode dengan `encodeURIComponent()`.
+### 4. Perbaikan InstanceCard
+- Tambah konfirmasi dialog di tombol Hapus (mencegah salah klik)
 
-### 3. QR code null setelah sync
-Setelah sync, `qr_code` disimpan sebagai `null`. Tombol "Fetch QR" memanggil `connect` action yang sudah benar, tapi perlu dipastikan response dari Evolution API diparse dengan tepat.
+## Detail Teknis
 
-## Perubahan
+### File yang diubah
+1. **Database migration** -- update CHECK constraint untuk izinkan `connecting`
+2. **`supabase/functions/manage-wa-instance/index.ts`** -- tambah action `list` dan `delete-all`
+3. **`src/pages/admin/DeviceManager.tsx`** -- tambah tombol "Lihat Instance VPS", dialog konfirmasi hapus, error handling lebih baik
+4. **`src/components/admin/InstanceCard.tsx`** -- tambah AlertDialog konfirmasi di tombol Hapus
 
-### File: `supabase/functions/manage-wa-instance/index.ts`
-
-1. **Fix webhook payload** di action `sync` dan `create`:
-   - Tambah field `enabled: true`
-   - Ganti `webhook_by_events` menjadi `webhookByEvents`
-   - Ganti `webhook_base64` menjadi `webhookBase64`
-
-2. **Fix URL encoding** di semua endpoint:
-   - Gunakan `encodeURIComponent(instance_name)` untuk semua URL path yang mengandung nama instance
-   - Berlaku untuk: connect, restart, logout, delete, webhook/set, webhook/find
-
-3. **Tidak ada perubahan UI** -- InstanceCard dan DeviceManager sudah benar, masalahnya murni di edge function.
-
-## Alur setelah fix
-1. Deploy edge function yang sudah diperbaiki
-2. Buka `/admin/devices`, pilih client, klik "Sync dari VPS"
-3. Webhook akan berhasil terpasang (tidak ada error `400` lagi)
-4. Klik "Fetch QR" di instance -- QR code muncul
-5. Scan QR -- status berubah ke "Connected" via webhook realtime
-
-## Yang perlu dipastikan di VPS
-- Pastikan port 8080 terbuka: `sudo ufw status` (cek 8080 ada di list)
-- Pastikan container jalan: `docker ps` (evolution-api harus "Up")
-- Tidak perlu konfigurasi tambahan di VPS -- semua fix ada di edge function
+### Alur setelah fix
+1. Buka Device Manager, pilih client
+2. Klik "Sync dari VPS" -- instance muncul (status `connecting` atau `disconnected` tidak error lagi)
+3. Klik "Hapus" di instance -- muncul konfirmasi dulu, baru dihapus
+4. Bisa mulai dari awal: hapus semua instance lama, buat baru, scan QR
