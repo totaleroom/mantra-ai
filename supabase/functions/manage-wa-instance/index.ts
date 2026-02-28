@@ -7,15 +7,83 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-/**
- * manage-wa-instance: Create, connect, restart, delete WhatsApp instances via Evolution API
- *
- * POST ?action=create  { client_id, instance_name }
- * POST ?action=connect { instance_name }
- * POST ?action=restart { instance_name }
- * POST ?action=logout  { instance_name }
- * DELETE               { instance_name }
- */
+/** Try to set webhook with camelCase format first, fallback to nested format */
+async function setWebhookWithFallback(
+  baseUrl: string,
+  apiKey: string,
+  instanceName: string,
+  webhookUrl: string,
+  webhookSecret: string
+): Promise<{ ok: boolean; format: string; error?: string }> {
+  const encoded = encodeURIComponent(instanceName);
+  const events = ["MESSAGES_UPSERT", "CONNECTION_UPDATE", "QRCODE_UPDATED"];
+
+  // Format A: camelCase flat (Evolution v2)
+  try {
+    const resA = await fetch(`${baseUrl}/webhook/set/${encoded}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: apiKey },
+      body: JSON.stringify({
+        enabled: true,
+        url: webhookUrl,
+        webhookByEvents: false,
+        webhookBase64: true,
+        headers: { "X-Webhook-Secret": webhookSecret },
+        events,
+      }),
+    });
+    if (resA.ok) {
+      await resA.text();
+      return { ok: true, format: "camelCase" };
+    }
+    const errA = await resA.text();
+    console.warn(`Webhook format A failed for ${instanceName}:`, resA.status, errA);
+
+    // If schema error, try format B
+    if (errA.includes("requires property") || resA.status === 400) {
+      // Format B: nested webhook object (Evolution v1)
+      const resB = await fetch(`${baseUrl}/webhook/set/${encoded}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: apiKey },
+        body: JSON.stringify({
+          webhook: {
+            enabled: true,
+            url: webhookUrl,
+            byEvents: false,
+            base64: true,
+            headers: { "X-Webhook-Secret": webhookSecret },
+            events,
+          },
+        }),
+      });
+      if (resB.ok) {
+        await resB.text();
+        return { ok: true, format: "nested" };
+      }
+      const errB = await resB.text();
+      console.warn(`Webhook format B also failed for ${instanceName}:`, resB.status, errB);
+      return { ok: false, format: "both_failed", error: errB };
+    }
+    return { ok: false, format: "camelCase_failed", error: errA };
+  } catch (e) {
+    return { ok: false, format: "exception", error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** Extract QR code from various Evolution API response formats */
+function extractQrCode(data: any): string | null {
+  if (!data) return null;
+  // Direct fields
+  if (data.base64) return data.base64;
+  if (data.code) return data.code;
+  // Nested qrcode object
+  if (data.qrcode?.base64) return data.qrcode.base64;
+  if (data.qrcode?.code) return data.qrcode.code;
+  // Nested pairingCode
+  if (data.pairingCode) return data.pairingCode;
+  return null;
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS")
     return new Response(null, { headers: corsHeaders });
@@ -65,28 +133,43 @@ serve(async (req) => {
     const url = new URL(req.url);
     const action = url.searchParams.get("action");
 
+    // Helper to get webhook config
+    const getWebhookConfig = async () => {
+      const { data: secretRow } = await supabaseAdmin
+        .from("platform_settings")
+        .select("value")
+        .eq("key", "wa_webhook_secret")
+        .maybeSingle();
+      const webhookSecret = secretRow?.value || Deno.env.get("WA_WEBHOOK_SECRET") || "";
+      const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+      const webhookUrl = `${SUPABASE_URL}/functions/v1/wa-webhook`;
+      return { webhookUrl, webhookSecret };
+    };
+
+    // Helper to update session with error
+    const updateSessionError = async (instanceName: string, error: string) => {
+      await supabaseAdmin
+        .from("wa_sessions")
+        .update({ status: "error", last_error: error })
+        .eq("instance_name", instanceName);
+    };
+
     // === DELETE: Remove instance ===
     if (req.method === "DELETE") {
       const { instance_name } = await req.json();
       if (!instance_name) throw new Error("instance_name required");
 
-      // Delete from Evolution API
       try {
         const delRes = await fetch(`${baseUrl}/instance/delete/${encodeURIComponent(instance_name)}`, {
           method: "DELETE",
           headers: { apikey: EVOLUTION_API_KEY },
         });
-        if (!delRes.ok) {
-          const t = await delRes.text();
-          console.warn("Evolution delete warning:", delRes.status, t);
-        } else {
-          await delRes.text();
-        }
+        const delText = await delRes.text();
+        if (!delRes.ok) console.warn("Evolution delete warning:", delRes.status, delText);
       } catch (e) {
         console.warn("Evolution delete failed (non-critical):", e);
       }
 
-      // Delete from database
       await supabaseAdmin
         .from("wa_sessions")
         .delete()
@@ -107,54 +190,151 @@ serve(async (req) => {
 
     const body = await req.json();
 
+    // --- HEALTH-CHECK ---
+    if (action === "health-check") {
+      const result: any = {
+        evolution_reachable: false,
+        instances: [],
+        webhook_status: {},
+        errors: [],
+      };
+
+      // 1. Check Evolution API reachability
+      try {
+        const pingRes = await fetch(`${baseUrl}/instance/fetchInstances`, {
+          method: "GET",
+          headers: { apikey: EVOLUTION_API_KEY },
+        });
+        if (pingRes.ok) {
+          result.evolution_reachable = true;
+          const instances = await pingRes.json();
+          result.instances = (instances || []).map((inst: any) => ({
+            name: inst.name || inst.instanceName || "unknown",
+            status: inst.connectionStatus === "open" ? "connected" : inst.connectionStatus || "unknown",
+          }));
+        } else {
+          const errText = await pingRes.text();
+          result.errors.push(`Evolution API returned ${pingRes.status}: ${errText.substring(0, 200)}`);
+        }
+      } catch (e) {
+        result.errors.push(`Cannot reach Evolution API: ${e instanceof Error ? e.message : String(e)}`);
+      }
+
+      // 2. Check webhook config for specific instances
+      if (result.evolution_reachable && result.instances.length > 0) {
+        for (const inst of result.instances) {
+          try {
+            const whRes = await fetch(`${baseUrl}/webhook/find/${encodeURIComponent(inst.name)}`, {
+              method: "GET",
+              headers: { apikey: EVOLUTION_API_KEY },
+            });
+            if (whRes.ok) {
+              const whData = await whRes.json();
+              result.webhook_status[inst.name] = {
+                configured: !!whData && whData !== null && Object.keys(whData).length > 0,
+                url: whData?.url || whData?.webhook?.url || null,
+                enabled: whData?.enabled ?? whData?.webhook?.enabled ?? false,
+              };
+            } else {
+              await whRes.text();
+              result.webhook_status[inst.name] = { configured: false, error: `HTTP ${whRes.status}` };
+            }
+          } catch (e) {
+            result.webhook_status[inst.name] = { configured: false, error: String(e) };
+          }
+        }
+      }
+
+      return new Response(
+        JSON.stringify({ success: true, ...result }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // --- SET-WEBHOOK: Fix webhook for an instance ---
+    if (action === "set-webhook") {
+      const { instance_name } = body;
+      if (!instance_name) throw new Error("instance_name required");
+
+      const { webhookUrl, webhookSecret } = await getWebhookConfig();
+      const whResult = await setWebhookWithFallback(baseUrl, EVOLUTION_API_KEY, instance_name, webhookUrl, webhookSecret);
+
+      if (!whResult.ok) {
+        await updateSessionError(instance_name, `Webhook setup failed: ${whResult.error}`);
+      } else {
+        await supabaseAdmin
+          .from("wa_sessions")
+          .update({ last_error: null })
+          .eq("instance_name", instance_name);
+      }
+
+      return new Response(
+        JSON.stringify({ success: whResult.ok, ...whResult }),
+        { status: whResult.ok ? 200 : 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     // --- CREATE ---
     if (action === "create") {
       const { client_id, instance_name } = body;
       if (!client_id || !instance_name) throw new Error("client_id and instance_name required");
 
-      // Get webhook secret from platform_settings
-      const { data: secretRow } = await supabaseAdmin
-        .from("platform_settings")
-        .select("value")
-        .eq("key", "wa_webhook_secret")
-        .maybeSingle();
-      const webhookSecret = secretRow?.value || Deno.env.get("WA_WEBHOOK_SECRET") || "";
+      const { webhookUrl, webhookSecret } = await getWebhookConfig();
 
-      const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-      const webhookUrl = `${SUPABASE_URL}/functions/v1/wa-webhook`;
+      // Create instance - try with webhook in create payload
+      let createData: any;
+      const createPayload = {
+        instanceName: instance_name,
+        integration: "WHATSAPP-BAILEYS",
+        qrcode: true,
+        webhook: {
+          url: webhookUrl,
+          byEvents: false,
+          base64: true,
+          headers: { "X-Webhook-Secret": webhookSecret },
+          events: ["MESSAGES_UPSERT", "CONNECTION_UPDATE", "QRCODE_UPDATED"],
+        },
+      };
 
-      // Create instance on Evolution API
       const createRes = await fetch(`${baseUrl}/instance/create`, {
         method: "POST",
         headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
-        body: JSON.stringify({
-          instanceName: instance_name,
-          integration: "WHATSAPP-BAILEYS",
-          qrcode: true,
-          webhook: {
-            url: webhookUrl,
-            byEvents: false,
-            base64: true,
-            headers: { "X-Webhook-Secret": webhookSecret },
-            events: [
-              "MESSAGES_UPSERT",
-              "CONNECTION_UPDATE",
-              "QRCODE_UPDATED",
-            ],
-          },
-        }),
+        body: JSON.stringify(createPayload),
       });
 
       if (!createRes.ok) {
         const errText = await createRes.text();
         console.error("Evolution create error:", createRes.status, errText);
-        throw new Error(`Failed to create instance: ${createRes.status} - ${errText}`);
+
+        // If webhook format issue, try without webhook and set separately
+        if (errText.includes("requires property") || createRes.status === 400) {
+          const createRes2 = await fetch(`${baseUrl}/instance/create`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
+            body: JSON.stringify({
+              instanceName: instance_name,
+              integration: "WHATSAPP-BAILEYS",
+              qrcode: true,
+            }),
+          });
+          if (!createRes2.ok) {
+            const errText2 = await createRes2.text();
+            throw new Error(`Failed to create instance: ${createRes2.status} - ${errText2}`);
+          }
+          createData = await createRes2.json();
+
+          // Set webhook separately with fallback
+          const whResult = await setWebhookWithFallback(baseUrl, EVOLUTION_API_KEY, instance_name, webhookUrl, webhookSecret);
+          console.log(`Webhook set result for ${instance_name}:`, whResult);
+        } else {
+          throw new Error(`Failed to create instance: ${createRes.status} - ${errText}`);
+        }
+      } else {
+        createData = await createRes.json();
       }
 
-      const createData = await createRes.json();
-      const qrCode = createData.qrcode?.base64 || createData.qrcode?.code || null;
+      const qrCode = extractQrCode(createData);
 
-      // Insert wa_sessions row
       const { error: insertErr } = await supabaseAdmin
         .from("wa_sessions")
         .insert({
@@ -162,6 +342,7 @@ serve(async (req) => {
           instance_name,
           status: "connecting",
           qr_code: qrCode,
+          last_error: null,
         });
 
       if (insertErr) {
@@ -187,17 +368,53 @@ serve(async (req) => {
 
       if (!connectRes.ok) {
         const errText = await connectRes.text();
+        // Provide actionable error messages
+        if (connectRes.status === 404) {
+          await updateSessionError(instance_name, "Instance tidak ditemukan di VPS. Coba Sync atau buat ulang.");
+          throw new Error("Instance tidak ditemukan di Evolution API. Mungkin sudah dihapus dari VPS.");
+        }
+        await updateSessionError(instance_name, `Connect gagal: HTTP ${connectRes.status}`);
         throw new Error(`Connect failed: ${connectRes.status} - ${errText}`);
       }
 
       const connectData = await connectRes.json();
-      const qrCode = connectData.base64 || connectData.code || null;
+      const qrCode = extractQrCode(connectData);
 
-      // Update QR in database
       if (qrCode) {
         await supabaseAdmin
           .from("wa_sessions")
-          .update({ qr_code: qrCode, status: "connecting" })
+          .update({ qr_code: qrCode, status: "connecting", last_error: null })
+          .eq("instance_name", instance_name);
+      } else {
+        // Check connection state - maybe already connected
+        try {
+          const stateRes = await fetch(`${baseUrl}/instance/connectionState/${encodeURIComponent(instance_name)}`, {
+            method: "GET",
+            headers: { apikey: EVOLUTION_API_KEY },
+          });
+          if (stateRes.ok) {
+            const stateData = await stateRes.json();
+            const state = stateData?.state || stateData?.instance?.state;
+            if (state === "open") {
+              await supabaseAdmin
+                .from("wa_sessions")
+                .update({ status: "connected", qr_code: null, last_error: null })
+                .eq("instance_name", instance_name);
+              return new Response(
+                JSON.stringify({ success: true, qr_code: null, already_connected: true }),
+                { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+              );
+            }
+          } else {
+            await stateRes.text();
+          }
+        } catch (e) {
+          console.warn("Connection state check failed:", e);
+        }
+
+        await supabaseAdmin
+          .from("wa_sessions")
+          .update({ status: "connecting", last_error: "QR belum tersedia. Coba restart instance lalu fetch QR ulang." })
           .eq("instance_name", instance_name);
       }
 
@@ -220,13 +437,17 @@ serve(async (req) => {
       if (!restartRes.ok) {
         const errText = await restartRes.text();
         console.warn("Restart warning:", restartRes.status, errText);
+        if (restartRes.status === 404) {
+          await updateSessionError(instance_name, "Instance tidak ditemukan di VPS.");
+          throw new Error("Instance tidak ditemukan di VPS. Coba Sync atau buat ulang.");
+        }
       } else {
         await restartRes.text();
       }
 
       await supabaseAdmin
         .from("wa_sessions")
-        .update({ status: "connecting", qr_code: null })
+        .update({ status: "connecting", qr_code: null, last_error: null })
         .eq("instance_name", instance_name);
 
       return new Response(
@@ -255,7 +476,7 @@ serve(async (req) => {
 
       await supabaseAdmin
         .from("wa_sessions")
-        .update({ status: "disconnected", qr_code: null })
+        .update({ status: "disconnected", qr_code: null, last_error: null })
         .eq("instance_name", instance_name);
 
       return new Response(
@@ -264,37 +485,27 @@ serve(async (req) => {
       );
     }
 
-    // --- SYNC: Import all instances from Evolution API ---
+    // --- SYNC ---
     if (action === "sync") {
       const { client_id } = body;
       if (!client_id) throw new Error("client_id required");
 
-      // 1. Fetch all instances from Evolution API
       const fetchRes = await fetch(`${baseUrl}/instance/fetchInstances`, {
         method: "GET",
         headers: { apikey: EVOLUTION_API_KEY },
       });
       if (!fetchRes.ok) {
         const errText = await fetchRes.text();
-        throw new Error(`Failed to fetch instances: ${fetchRes.status} - ${errText}`);
+        throw new Error(`Gagal mengambil daftar instance dari VPS: ${fetchRes.status}`);
       }
       const instances = await fetchRes.json();
 
-      // 2. Get existing sessions
       const { data: existingSessions } = await supabaseAdmin
         .from("wa_sessions")
         .select("instance_name");
       const existingNames = new Set((existingSessions || []).map((s: any) => s.instance_name));
 
-      // 3. Get webhook config
-      const { data: secretRow } = await supabaseAdmin
-        .from("platform_settings")
-        .select("value")
-        .eq("key", "wa_webhook_secret")
-        .maybeSingle();
-      const webhookSecret = secretRow?.value || Deno.env.get("WA_WEBHOOK_SECRET") || "";
-      const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-      const webhookUrl = `${SUPABASE_URL}/functions/v1/wa-webhook`;
+      const { webhookUrl, webhookSecret } = await getWebhookConfig();
 
       const synced: string[] = [];
       const existing: string[] = [];
@@ -306,37 +517,20 @@ serve(async (req) => {
         if (existingNames.has(name)) {
           existing.push(name);
         } else {
-          // Insert into wa_sessions
           await supabaseAdmin.from("wa_sessions").insert({
             client_id,
             instance_name: name,
             status: inst.connectionStatus === "open" ? "connected" : "disconnected",
             qr_code: null,
+            last_error: null,
           });
           synced.push(name);
         }
 
-        // Set webhook for all instances (synced or existing)
-        try {
-          const whRes = await fetch(`${baseUrl}/webhook/set/${encodeURIComponent(name)}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
-            body: JSON.stringify({
-              enabled: true,
-              url: webhookUrl,
-              webhookByEvents: false,
-              webhookBase64: true,
-              headers: { "X-Webhook-Secret": webhookSecret },
-              events: ["MESSAGES_UPSERT", "CONNECTION_UPDATE", "QRCODE_UPDATED"],
-            }),
-          });
-          if (!whRes.ok) {
-            console.warn(`Webhook set warning for ${name}:`, whRes.status, await whRes.text());
-          } else {
-            await whRes.text();
-          }
-        } catch (e) {
-          console.warn(`Webhook set failed for ${name}:`, e);
+        // Set webhook with fallback
+        const whResult = await setWebhookWithFallback(baseUrl, EVOLUTION_API_KEY, name, webhookUrl, webhookSecret);
+        if (!whResult.ok) {
+          console.warn(`Webhook setup failed for ${name}:`, whResult.error);
         }
       }
 
@@ -346,7 +540,7 @@ serve(async (req) => {
       );
     }
 
-    // --- LIST: Fetch all instances from Evolution API ---
+    // --- LIST ---
     if (action === "list") {
       const fetchRes = await fetch(`${baseUrl}/instance/fetchInstances`, {
         method: "GET",
@@ -354,7 +548,7 @@ serve(async (req) => {
       });
       if (!fetchRes.ok) {
         const errText = await fetchRes.text();
-        throw new Error(`Failed to fetch instances: ${fetchRes.status} - ${errText}`);
+        throw new Error(`Gagal mengambil daftar instance: ${fetchRes.status}`);
       }
       const instances = await fetchRes.json();
       const result = (instances || []).map((inst: any) => ({
@@ -367,11 +561,10 @@ serve(async (req) => {
       );
     }
 
-    // --- DELETE-ALL: Delete all instances from Evolution API and database ---
+    // --- DELETE-ALL ---
     if (action === "delete-all") {
       const { client_id } = body;
 
-      // Fetch all instances from Evolution API
       try {
         const fetchRes = await fetch(`${baseUrl}/instance/fetchInstances`, {
           method: "GET",
@@ -399,11 +592,9 @@ serve(async (req) => {
         console.warn("Fetch instances for delete-all failed:", e);
       }
 
-      // Delete all from database
       if (client_id) {
         await supabaseAdmin.from("wa_sessions").delete().eq("client_id", client_id);
       } else {
-        // Delete all sessions
         await supabaseAdmin.from("wa_sessions").delete().neq("id", "00000000-0000-0000-0000-000000000000");
       }
 

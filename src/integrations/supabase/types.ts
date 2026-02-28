@@ -339,6 +339,7 @@ export type Database = {
           created_at: string
           id: string
           instance_name: string | null
+          last_error: string | null
           qr_code: string | null
           status: string
           updated_at: string
@@ -348,6 +349,7 @@ export type Database = {
           created_at?: string
           id?: string
           instance_name?: string | null
+          last_error?: string | null
           qr_code?: string | null
           status?: string
           updated_at?: string
@@ -357,6 +359,7 @@ export type Database = {
           created_at?: string
           id?: string
           instance_name?: string | null
+          last_error?: string | null
           qr_code?: string | null
           status?: string
           updated_at?: string
@@ -365,7 +368,7 @@ export type Database = {
           {
             foreignKeyName: "wa_sessions_client_id_fkey"
             columns: ["client_id"]
-            isOneToOne: true
+            isOneToOne: false
             referencedRelation: "clients"
             referencedColumns: ["id"]
           },
