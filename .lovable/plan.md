@@ -1,56 +1,69 @@
 
+# Fix QR Code & Webhook - Evolution API v2 Compatibility
 
-# Sync Instance WhatsApp dari VPS + Perbaikan Device Manager
+## Masalah yang Ditemukan
 
-## Masalah
-- VPS sudah punya 2 instance (`Totale Bot`, `mantra-bot-1`) tapi tabel `wa_sessions` kosong
-- Dashboard Device Manager tidak bisa menampilkan, mengontrol, atau menghapus instance yang ada
-- Webhook belum terpasang di instance yang ada
+Dari log edge function, ada 3 bug yang menyebabkan QR tidak muncul dan webhook tidak terpasang:
 
-## Solusi
+### 1. Format webhook salah (penyebab utama)
+Log: `"instance requires property \"webhook\""`
 
-### 1. Tambah action `sync` di edge function `manage-wa-instance`
-Endpoint baru `POST ?action=sync` yang:
-- Memanggil Evolution API `GET /instance/fetchInstances` untuk ambil semua instance
-- Untuk setiap instance yang belum ada di `wa_sessions`, insert row baru dengan `client_id` yang dipilih
-- Otomatis pasang webhook (`POST /webhook/set/{instance}`) ke setiap instance dengan URL, secret, dan events yang benar
-- Return daftar instance yang berhasil di-sync
+Kode saat ini menggunakan field `webhook_by_events` dan `webhook_base64` (format lama), tapi Evolution API v2 menggunakan `enabled`, `webhookByEvents`, `webhookBase64` (camelCase).
 
-### 2. Tambah tombol "Sync dari VPS" di DeviceManager
-- Tombol baru di samping dropdown client
-- Saat diklik, panggil `manage-wa-instance?action=sync` dengan `client_id` yang dipilih
-- Setelah sync selesai, instance muncul di dashboard dan bisa langsung dikontrol
-
-### 3. Perbaikan minor DeviceManager
-- Tampilkan semua instance milik client (bukan hanya 1 via `maybeSingle`)
-- Support multiple instances per client (ubah dari single session ke array)
-- Setiap instance punya tombol sendiri: Fetch QR, Restart, Logout, Hapus
-
-## Alur setelah implementasi
-1. Buka `/admin/devices`, pilih client `Totale.Room`
-2. Klik "Sync dari VPS" -- kedua instance (`Totale Bot`, `mantra-bot-1`) akan muncul
-3. Webhook otomatis terpasang di kedua instance
-4. Klik "Fetch QR" di salah satu instance untuk scan dan connect
-5. Setelah scan, status otomatis berubah ke "Connected" via webhook realtime
-
-## Detail Teknis
-
-### Edge function `manage-wa-instance` - action sync
+**Payload saat ini (SALAH):**
 ```text
-POST ?action=sync { client_id }
-1. GET /instance/fetchInstances dari Evolution API
-2. Untuk setiap instance:
-   a. Cek apakah sudah ada di wa_sessions (by instance_name)
-   b. Jika belum, INSERT ke wa_sessions
-   c. POST /webhook/set/{instanceName} dengan config webhook
-3. Return { synced: [...], existing: [...] }
+{
+  url: "...",
+  webhook_by_events: false,
+  webhook_base64: true,
+  headers: { ... },
+  events: [...]
+}
 ```
 
-### DeviceManager - Multiple instances
-- Query `wa_sessions` dengan `.select("*").eq("client_id", ...)` (tanpa `maybeSingle`)
-- Render setiap instance sebagai card terpisah dengan status, QR, dan action buttons
-- Realtime subscription tetap berjalan untuk update otomatis
+**Payload yang benar (Evolution API v2):**
+```text
+{
+  enabled: true,
+  url: "...",
+  webhookByEvents: false,
+  webhookBase64: true,
+  headers: { ... },
+  events: [...]
+}
+```
 
-### File yang diubah
-1. `supabase/functions/manage-wa-instance/index.ts` - tambah action `sync`
-2. `src/pages/admin/DeviceManager.tsx` - tambah tombol sync + support multi-instance
+### 2. URL encoding untuk nama instance dengan spasi
+Log: `Cannot PUT /instance/restart/Totale%20Bot`
+
+Instance bernama "Totale Bot" (dengan spasi) menyebabkan error di beberapa endpoint. Semua URL perlu di-encode dengan `encodeURIComponent()`.
+
+### 3. QR code null setelah sync
+Setelah sync, `qr_code` disimpan sebagai `null`. Tombol "Fetch QR" memanggil `connect` action yang sudah benar, tapi perlu dipastikan response dari Evolution API diparse dengan tepat.
+
+## Perubahan
+
+### File: `supabase/functions/manage-wa-instance/index.ts`
+
+1. **Fix webhook payload** di action `sync` dan `create`:
+   - Tambah field `enabled: true`
+   - Ganti `webhook_by_events` menjadi `webhookByEvents`
+   - Ganti `webhook_base64` menjadi `webhookBase64`
+
+2. **Fix URL encoding** di semua endpoint:
+   - Gunakan `encodeURIComponent(instance_name)` untuk semua URL path yang mengandung nama instance
+   - Berlaku untuk: connect, restart, logout, delete, webhook/set, webhook/find
+
+3. **Tidak ada perubahan UI** -- InstanceCard dan DeviceManager sudah benar, masalahnya murni di edge function.
+
+## Alur setelah fix
+1. Deploy edge function yang sudah diperbaiki
+2. Buka `/admin/devices`, pilih client, klik "Sync dari VPS"
+3. Webhook akan berhasil terpasang (tidak ada error `400` lagi)
+4. Klik "Fetch QR" di instance -- QR code muncul
+5. Scan QR -- status berubah ke "Connected" via webhook realtime
+
+## Yang perlu dipastikan di VPS
+- Pastikan port 8080 terbuka: `sudo ufw status` (cek 8080 ada di list)
+- Pastikan container jalan: `docker ps` (evolution-api harus "Up")
+- Tidak perlu konfigurasi tambahan di VPS -- semua fix ada di edge function
