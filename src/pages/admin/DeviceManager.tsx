@@ -9,9 +9,10 @@ import { Input } from "@/components/ui/input";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
-import { Loader2, Wifi, WifiOff, RotateCcw, LogOut as LogOutIcon, Plus, QrCode, Trash2 } from "lucide-react";
+import { Loader2, Wifi, WifiOff, RotateCcw, LogOut as LogOutIcon, Plus, QrCode, Trash2, RefreshCw } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import QRCode from "react-qr-code";
+import InstanceCard from "@/components/admin/InstanceCard";
 
 interface Client { id: string; name: string; }
 interface WaSession {
@@ -25,7 +26,7 @@ interface WaSession {
 export default function DeviceManager() {
   const [clients, setClients] = useState<Client[]>([]);
   const [selectedClientId, setSelectedClientId] = useState<string>("");
-  const [session, setSession] = useState<WaSession | null>(null);
+  const [sessions, setSessions] = useState<WaSession[]>([]);
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -39,23 +40,22 @@ export default function DeviceManager() {
     });
   }, []);
 
-  // Fetch session + realtime subscription
+  // Fetch sessions + realtime subscription
   useEffect(() => {
-    if (!selectedClientId) { setSession(null); return; }
+    if (!selectedClientId) { setSessions([]); return; }
 
     setLoading(true);
     supabase
       .from("wa_sessions" as any)
       .select("*")
       .eq("client_id", selectedClientId)
-      .maybeSingle()
       .then(({ data }) => {
-        setSession(data as any);
+        setSessions((data as any[] || []) as WaSession[]);
         setLoading(false);
       });
 
     const channel = supabase
-      .channel(`wa_session_${selectedClientId}`)
+      .channel(`wa_sessions_${selectedClientId}`)
       .on(
         "postgres_changes",
         {
@@ -66,9 +66,11 @@ export default function DeviceManager() {
         },
         (payload) => {
           if (payload.eventType === "DELETE") {
-            setSession(null);
+            setSessions(prev => prev.filter(s => s.id !== (payload.old as any).id));
+          } else if (payload.eventType === "INSERT") {
+            setSessions(prev => [...prev, payload.new as WaSession]);
           } else {
-            setSession(payload.new as WaSession);
+            setSessions(prev => prev.map(s => s.id === (payload.new as any).id ? payload.new as WaSession : s));
           }
         }
       )
@@ -120,66 +122,50 @@ export default function DeviceManager() {
     }
   };
 
-  const handleFetchQR = async () => {
-    if (!session?.instance_name) return;
-    setActionLoading("connect");
+  const handleSync = async () => {
+    if (!selectedClientId) return;
+    setActionLoading("sync");
     try {
-      await callManageInstance("connect", { instance_name: session.instance_name });
-      toast({ title: "QR code diperbarui" });
+      const result = await callManageInstance("sync", { client_id: selectedClientId });
+      toast({
+        title: "Sync selesai!",
+        description: `${result.synced?.length || 0} instance baru di-import, ${result.existing?.length || 0} sudah ada. Webhook terpasang.`,
+      });
     } catch (e: any) {
-      toast({ variant: "destructive", title: "Gagal fetch QR", description: e.message });
+      toast({ variant: "destructive", title: "Gagal sync", description: e.message });
     } finally {
       setActionLoading(null);
     }
   };
 
-  const handleRestart = async () => {
-    if (!session?.instance_name) return;
-    setActionLoading("restart");
+  const handleInstanceAction = async (action: string, instanceNameVal: string) => {
+    const loadingKey = `${action}_${instanceNameVal}`;
+    setActionLoading(loadingKey);
     try {
-      await callManageInstance("restart", { instance_name: session.instance_name });
-      toast({ title: "Session di-restart, menunggu QR baru..." });
-    } catch (e: any) {
-      toast({ variant: "destructive", title: "Error", description: e.message });
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
-  const handleLogout = async () => {
-    if (!session?.instance_name) return;
-    setActionLoading("logout");
-    try {
-      await callManageInstance("logout", { instance_name: session.instance_name });
-      toast({ title: "Session logout berhasil" });
-    } catch (e: any) {
-      toast({ variant: "destructive", title: "Error", description: e.message });
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!session?.instance_name) return;
-    setActionLoading("delete");
-    try {
-      await callManageInstance("", { instance_name: session.instance_name }, "DELETE");
-      setSession(null);
-      toast({ title: "Instance dihapus" });
+      if (action === "delete") {
+        await callManageInstance("", { instance_name: instanceNameVal }, "DELETE");
+        toast({ title: "Instance dihapus" });
+      } else {
+        await callManageInstance(action, { instance_name: instanceNameVal });
+        const messages: Record<string, string> = {
+          connect: "QR code diperbarui",
+          restart: "Session di-restart, menunggu QR baru...",
+          logout: "Session logout berhasil",
+        };
+        toast({ title: messages[action] || "Berhasil" });
+      }
     } catch (e: any) {
       toast({ variant: "destructive", title: "Error", description: e.message });
     } finally {
       setActionLoading(null);
     }
   };
-
-  const isQrBase64 = session?.qr_code?.startsWith("data:") || session?.qr_code?.startsWith("iVBOR");
 
   return (
     <div>
       <h1 className="mb-6 text-2xl font-bold text-foreground">Device & Connection</h1>
 
-      <div className="mb-6 flex items-center gap-3">
+      <div className="mb-6 flex items-center gap-3 flex-wrap">
         <div className="max-w-sm flex-1">
           <Select value={selectedClientId} onValueChange={setSelectedClientId}>
             <SelectTrigger>
@@ -193,38 +179,51 @@ export default function DeviceManager() {
           </Select>
         </div>
 
-        {selectedClientId && !session && !loading && (
-          <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-            <DialogTrigger asChild>
-              <Button size="sm" className="gap-2">
-                <Plus className="h-4 w-4" /> Buat Instance
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Buat Instance WhatsApp</DialogTitle>
-                <DialogDescription>
-                  Masukkan nama instance untuk membuat koneksi WhatsApp baru.
-                </DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4 py-4">
-                <Input
-                  placeholder="Nama instance (misal: mantra-bot-1)"
-                  value={instanceName}
-                  onChange={(e) => setInstanceName(e.target.value)}
-                />
-              </div>
-              <DialogFooter>
-                <Button
-                  onClick={handleCreate}
-                  disabled={!instanceName.trim() || actionLoading === "create"}
-                >
-                  {actionLoading === "create" && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  Buat & Dapatkan QR
+        {selectedClientId && (
+          <>
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-2"
+              onClick={handleSync}
+              disabled={actionLoading === "sync"}
+            >
+              {actionLoading === "sync" ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              Sync dari VPS
+            </Button>
+
+            <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+              <DialogTrigger asChild>
+                <Button size="sm" className="gap-2">
+                  <Plus className="h-4 w-4" /> Buat Instance
                 </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Buat Instance WhatsApp</DialogTitle>
+                  <DialogDescription>
+                    Masukkan nama instance untuk membuat koneksi WhatsApp baru.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 py-4">
+                  <Input
+                    placeholder="Nama instance (misal: mantra-bot-1)"
+                    value={instanceName}
+                    onChange={(e) => setInstanceName(e.target.value)}
+                  />
+                </div>
+                <DialogFooter>
+                  <Button
+                    onClick={handleCreate}
+                    disabled={!instanceName.trim() || actionLoading === "create"}
+                  >
+                    {actionLoading === "create" && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Buat & Dapatkan QR
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          </>
         )}
       </div>
 
@@ -239,102 +238,19 @@ export default function DeviceManager() {
       )}
 
       {selectedClientId && !loading && (
-        <div className="space-y-6">
-          {session && (
-            <>
-              {/* Instance Info */}
-              <div className="flex items-center gap-3 flex-wrap">
-                <span className="text-sm font-medium text-muted-foreground">Instance:</span>
-                <code className="rounded bg-muted px-2 py-1 text-sm">{session.instance_name || "N/A"}</code>
-                <span className="text-sm font-medium text-muted-foreground ml-4">Status:</span>
-                {session.status === "connected" ? (
-                  <Badge className="gap-1 bg-green-500/20 text-green-700 border-green-500/30">
-                    <Wifi className="h-3 w-3" /> Connected
-                  </Badge>
-                ) : (
-                  <Badge className="gap-1 bg-yellow-500/20 text-yellow-700 border-yellow-500/30">
-                    <WifiOff className="h-3 w-3" /> {session.status}
-                  </Badge>
-                )}
-              </div>
-
-              {/* QR Code Area */}
-              {session.status !== "connected" && (
-                <div className="rounded-lg border border-border bg-card p-8 text-center max-w-sm">
-                  {session.qr_code ? (
-                    <>
-                      <div className="mx-auto mb-4 inline-block rounded-lg bg-white p-4">
-                        {isQrBase64 ? (
-                          <img
-                            src={session.qr_code.startsWith("data:") ? session.qr_code : `data:image/png;base64,${session.qr_code}`}
-                            alt="QR Code"
-                            className="h-[220px] w-[220px]"
-                          />
-                        ) : (
-                          <QRCode value={session.qr_code} size={220} />
-                        )}
-                      </div>
-                      <p className="text-sm text-muted-foreground">
-                        Scan QR code ini dengan WhatsApp di HP klien.
-                      </p>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="mt-3 gap-2"
-                        onClick={handleFetchQR}
-                        disabled={actionLoading === "connect"}
-                      >
-                        {actionLoading === "connect" ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
-                        Refresh QR
-                      </Button>
-                    </>
-                  ) : (
-                    <div className="py-8">
-                      <Loader2 className="mx-auto mb-3 h-8 w-8 animate-spin text-muted-foreground" />
-                      <p className="text-sm text-muted-foreground">Menunggu QR code...</p>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="mt-3 gap-2"
-                        onClick={handleFetchQR}
-                        disabled={actionLoading === "connect"}
-                      >
-                        {actionLoading === "connect" ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
-                        Fetch QR
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {session.status === "connected" && (
-                <div className="rounded-lg border border-green-500/30 bg-green-50 p-6 text-center max-w-sm dark:bg-green-500/10">
-                  <Wifi className="mx-auto mb-2 h-8 w-8 text-green-600" />
-                  <p className="font-medium text-green-700 dark:text-green-400">Device terhubung!</p>
-                </div>
-              )}
-
-              {/* Actions */}
-              <div className="flex gap-2 flex-wrap">
-                <Button variant="outline" size="sm" onClick={handleRestart} disabled={!!actionLoading} className="gap-2">
-                  {actionLoading === "restart" ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
-                  Restart
-                </Button>
-                <Button variant="outline" size="sm" onClick={handleLogout} disabled={!!actionLoading} className="gap-2">
-                  {actionLoading === "logout" ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOutIcon className="h-4 w-4" />}
-                  Logout
-                </Button>
-                <Button variant="destructive" size="sm" onClick={handleDelete} disabled={!!actionLoading} className="gap-2">
-                  {actionLoading === "delete" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                  Hapus Instance
-                </Button>
-              </div>
-            </>
-          )}
-
-          {!session && (
+        <div className="space-y-4">
+          {sessions.length > 0 ? (
+            sessions.map((session) => (
+              <InstanceCard
+                key={session.id}
+                session={session}
+                actionLoading={actionLoading}
+                onAction={handleInstanceAction}
+              />
+            ))
+          ) : (
             <p className="text-sm text-muted-foreground">
-              Belum ada instance untuk client ini. Klik "Buat Instance" untuk membuat koneksi WhatsApp baru.
+              Belum ada instance untuk client ini. Klik "Sync dari VPS" untuk import instance yang sudah ada, atau "Buat Instance" untuk membuat baru.
             </p>
           )}
         </div>
