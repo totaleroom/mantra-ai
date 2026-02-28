@@ -346,6 +346,73 @@ serve(async (req) => {
       );
     }
 
+    // --- LIST: Fetch all instances from Evolution API ---
+    if (action === "list") {
+      const fetchRes = await fetch(`${baseUrl}/instance/fetchInstances`, {
+        method: "GET",
+        headers: { apikey: EVOLUTION_API_KEY },
+      });
+      if (!fetchRes.ok) {
+        const errText = await fetchRes.text();
+        throw new Error(`Failed to fetch instances: ${fetchRes.status} - ${errText}`);
+      }
+      const instances = await fetchRes.json();
+      const result = (instances || []).map((inst: any) => ({
+        name: inst.name || inst.instanceName || "unknown",
+        status: inst.connectionStatus === "open" ? "connected" : inst.connectionStatus || "unknown",
+      }));
+      return new Response(
+        JSON.stringify({ success: true, instances: result }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // --- DELETE-ALL: Delete all instances from Evolution API and database ---
+    if (action === "delete-all") {
+      const { client_id } = body;
+
+      // Fetch all instances from Evolution API
+      try {
+        const fetchRes = await fetch(`${baseUrl}/instance/fetchInstances`, {
+          method: "GET",
+          headers: { apikey: EVOLUTION_API_KEY },
+        });
+        if (fetchRes.ok) {
+          const instances = await fetchRes.json();
+          for (const inst of instances || []) {
+            const name = inst.name || inst.instanceName;
+            if (!name) continue;
+            try {
+              const delRes = await fetch(`${baseUrl}/instance/delete/${encodeURIComponent(name)}`, {
+                method: "DELETE",
+                headers: { apikey: EVOLUTION_API_KEY },
+              });
+              await delRes.text();
+            } catch (e) {
+              console.warn(`Delete instance ${name} failed:`, e);
+            }
+          }
+        } else {
+          await fetchRes.text();
+        }
+      } catch (e) {
+        console.warn("Fetch instances for delete-all failed:", e);
+      }
+
+      // Delete all from database
+      if (client_id) {
+        await supabaseAdmin.from("wa_sessions").delete().eq("client_id", client_id);
+      } else {
+        // Delete all sessions
+        await supabaseAdmin.from("wa_sessions").delete().neq("id", "00000000-0000-0000-0000-000000000000");
+      }
+
+      return new Response(
+        JSON.stringify({ success: true }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     return new Response(JSON.stringify({ error: "Unknown action" }), {
       status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

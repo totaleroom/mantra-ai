@@ -1,5 +1,9 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { Loader2, Wifi, WifiOff, RotateCcw, LogOut as LogOutIcon, QrCode, Trash2 } from "lucide-react";
 import QRCode from "react-qr-code";
 
@@ -23,20 +27,34 @@ export default function InstanceCard({ session, actionLoading, onAction }: Insta
   const isAnyLoading = !!actionLoading;
   const isQrBase64 = session.qr_code?.startsWith("data:") || session.qr_code?.startsWith("iVBOR");
 
+  const statusBadge = () => {
+    if (session.status === "connected") {
+      return (
+        <Badge className="gap-1 bg-green-500/20 text-green-700 border-green-500/30">
+          <Wifi className="h-3 w-3" /> Connected
+        </Badge>
+      );
+    }
+    if (session.status === "connecting") {
+      return (
+        <Badge className="gap-1 bg-blue-500/20 text-blue-700 border-blue-500/30">
+          <Loader2 className="h-3 w-3 animate-spin" /> Connecting
+        </Badge>
+      );
+    }
+    return (
+      <Badge className="gap-1 bg-yellow-500/20 text-yellow-700 border-yellow-500/30">
+        <WifiOff className="h-3 w-3" /> {session.status}
+      </Badge>
+    );
+  };
+
   return (
     <div className="rounded-lg border border-border bg-card p-5 space-y-4">
       {/* Header */}
       <div className="flex items-center gap-3 flex-wrap">
         <code className="rounded bg-muted px-2 py-1 text-sm font-medium">{name}</code>
-        {session.status === "connected" ? (
-          <Badge className="gap-1 bg-green-500/20 text-green-700 border-green-500/30">
-            <Wifi className="h-3 w-3" /> Connected
-          </Badge>
-        ) : (
-          <Badge className="gap-1 bg-yellow-500/20 text-yellow-700 border-yellow-500/30">
-            <WifiOff className="h-3 w-3" /> {session.status}
-          </Badge>
-        )}
+        {statusBadge()}
       </div>
 
       {/* QR Code Area */}
@@ -90,10 +108,29 @@ export default function InstanceCard({ session, actionLoading, onAction }: Insta
           {isLoading("logout") ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogOutIcon className="h-4 w-4" />}
           Logout
         </Button>
-        <Button variant="destructive" size="sm" onClick={() => onAction("delete", name)} disabled={isAnyLoading} className="gap-2">
-          {isLoading("delete") ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-          Hapus
-        </Button>
+
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button variant="destructive" size="sm" disabled={isAnyLoading} className="gap-2">
+              {isLoading("delete") ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+              Hapus
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Hapus Instance "{name}"?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Instance akan dihapus dari VPS dan database. Aksi ini tidak bisa dibatalkan.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Batal</AlertDialogCancel>
+              <AlertDialogAction onClick={() => onAction("delete", name)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                Ya, Hapus
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </div>
   );

@@ -1,6 +1,5 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -9,9 +8,12 @@ import { Input } from "@/components/ui/input";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
-import { Loader2, Wifi, WifiOff, RotateCcw, LogOut as LogOutIcon, Plus, QrCode, Trash2, RefreshCw } from "lucide-react";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Loader2, Plus, RefreshCw, Server, Trash2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import QRCode from "react-qr-code";
 import InstanceCard from "@/components/admin/InstanceCard";
 
 interface Client { id: string; name: string; }
@@ -22,6 +24,7 @@ interface WaSession {
   qr_code: string | null;
   instance_name: string | null;
 }
+interface VpsInstance { name: string; status: string; }
 
 export default function DeviceManager() {
   const [clients, setClients] = useState<Client[]>([]);
@@ -31,6 +34,9 @@ export default function DeviceManager() {
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [instanceName, setInstanceName] = useState("");
+  const [vpsInstances, setVpsInstances] = useState<VpsInstance[] | null>(null);
+  const [vpsOpen, setVpsOpen] = useState(false);
+  const [deleteAllOpen, setDeleteAllOpen] = useState(false);
   const { toast } = useToast();
 
   // Fetch clients
@@ -129,10 +135,37 @@ export default function DeviceManager() {
       const result = await callManageInstance("sync", { client_id: selectedClientId });
       toast({
         title: "Sync selesai!",
-        description: `${result.synced?.length || 0} instance baru di-import, ${result.existing?.length || 0} sudah ada. Webhook terpasang.`,
+        description: `${result.synced?.length || 0} instance baru di-import, ${result.existing?.length || 0} sudah ada.`,
       });
     } catch (e: any) {
       toast({ variant: "destructive", title: "Gagal sync", description: e.message });
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleFetchVps = async () => {
+    setActionLoading("vps-list");
+    try {
+      const result = await callManageInstance("list", {});
+      setVpsInstances(result.instances || []);
+      setVpsOpen(true);
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Gagal ambil daftar VPS", description: e.message });
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleDeleteAll = async () => {
+    setActionLoading("delete-all");
+    setDeleteAllOpen(false);
+    try {
+      await callManageInstance("delete-all", { client_id: selectedClientId || undefined });
+      toast({ title: "Semua instance dihapus", description: "Anda bisa mulai dari awal." });
+      setSessions([]);
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Gagal hapus semua", description: e.message });
     } finally {
       setActionLoading(null);
     }
@@ -178,6 +211,45 @@ export default function DeviceManager() {
             </SelectContent>
           </Select>
         </div>
+
+        {/* VPS & Global Actions */}
+        <Button
+          size="sm"
+          variant="outline"
+          className="gap-2"
+          onClick={handleFetchVps}
+          disabled={actionLoading === "vps-list"}
+        >
+          {actionLoading === "vps-list" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Server className="h-4 w-4" />}
+          Lihat Instance VPS
+        </Button>
+
+        <AlertDialog open={deleteAllOpen} onOpenChange={setDeleteAllOpen}>
+          <Button
+            size="sm"
+            variant="destructive"
+            className="gap-2"
+            onClick={() => setDeleteAllOpen(true)}
+            disabled={!!actionLoading}
+          >
+            <Trash2 className="h-4 w-4" />
+            Hapus Semua
+          </Button>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Hapus Semua Instance?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Semua instance di VPS dan database akan dihapus. Anda harus membuat instance baru setelah ini. Aksi ini tidak bisa dibatalkan.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Batal</AlertDialogCancel>
+              <AlertDialogAction onClick={handleDeleteAll} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                Ya, Hapus Semua
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         {selectedClientId && (
           <>
@@ -227,6 +299,30 @@ export default function DeviceManager() {
         )}
       </div>
 
+      {/* VPS Instance List Dialog */}
+      <Dialog open={vpsOpen} onOpenChange={setVpsOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Instance di VPS</DialogTitle>
+            <DialogDescription>Daftar semua instance yang ada di Evolution API server.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 max-h-[400px] overflow-y-auto">
+            {vpsInstances && vpsInstances.length > 0 ? (
+              vpsInstances.map((inst, i) => (
+                <div key={i} className="flex items-center justify-between rounded-md border border-border px-3 py-2">
+                  <code className="text-sm">{inst.name}</code>
+                  <span className={`text-xs font-medium ${inst.status === "connected" ? "text-green-600" : "text-yellow-600"}`}>
+                    {inst.status}
+                  </span>
+                </div>
+              ))
+            ) : (
+              <p className="text-sm text-muted-foreground text-center py-4">Tidak ada instance di VPS.</p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {!selectedClientId && (
         <p className="text-muted-foreground">Pilih client untuk melihat status WhatsApp device.</p>
       )}
@@ -250,7 +346,7 @@ export default function DeviceManager() {
             ))
           ) : (
             <p className="text-sm text-muted-foreground">
-              Belum ada instance untuk client ini. Klik "Sync dari VPS" untuk import instance yang sudah ada, atau "Buat Instance" untuk membuat baru.
+              Belum ada instance untuk client ini. Klik "Sync dari VPS" untuk import, atau "Buat Instance" untuk membuat baru.
             </p>
           )}
         </div>
