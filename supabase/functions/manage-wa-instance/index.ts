@@ -72,7 +72,7 @@ serve(async (req) => {
 
       // Delete from Evolution API
       try {
-        const delRes = await fetch(`${baseUrl}/instance/delete/${instance_name}`, {
+        const delRes = await fetch(`${baseUrl}/instance/delete/${encodeURIComponent(instance_name)}`, {
           method: "DELETE",
           headers: { apikey: EVOLUTION_API_KEY },
         });
@@ -180,7 +180,7 @@ serve(async (req) => {
       const { instance_name } = body;
       if (!instance_name) throw new Error("instance_name required");
 
-      const connectRes = await fetch(`${baseUrl}/instance/connect/${instance_name}`, {
+      const connectRes = await fetch(`${baseUrl}/instance/connect/${encodeURIComponent(instance_name)}`, {
         method: "GET",
         headers: { apikey: EVOLUTION_API_KEY },
       });
@@ -212,7 +212,7 @@ serve(async (req) => {
       const { instance_name } = body;
       if (!instance_name) throw new Error("instance_name required");
 
-      const restartRes = await fetch(`${baseUrl}/instance/restart/${instance_name}`, {
+      const restartRes = await fetch(`${baseUrl}/instance/restart/${encodeURIComponent(instance_name)}`, {
         method: "PUT",
         headers: { apikey: EVOLUTION_API_KEY },
       });
@@ -241,7 +241,7 @@ serve(async (req) => {
       if (!instance_name) throw new Error("instance_name required");
 
       try {
-        const logoutRes = await fetch(`${baseUrl}/instance/logout/${instance_name}`, {
+        const logoutRes = await fetch(`${baseUrl}/instance/logout/${encodeURIComponent(instance_name)}`, {
           method: "DELETE",
           headers: { apikey: EVOLUTION_API_KEY },
         });
@@ -318,13 +318,14 @@ serve(async (req) => {
 
         // Set webhook for all instances (synced or existing)
         try {
-          const whRes = await fetch(`${baseUrl}/webhook/set/${name}`, {
+          const whRes = await fetch(`${baseUrl}/webhook/set/${encodeURIComponent(name)}`, {
             method: "POST",
             headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
             body: JSON.stringify({
+              enabled: true,
               url: webhookUrl,
-              webhook_by_events: false,
-              webhook_base64: true,
+              webhookByEvents: false,
+              webhookBase64: true,
               headers: { "X-Webhook-Secret": webhookSecret },
               events: ["MESSAGES_UPSERT", "CONNECTION_UPDATE", "QRCODE_UPDATED"],
             }),
