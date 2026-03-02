@@ -12,61 +12,74 @@ interface AuthContextValue {
   signOut: () => Promise<void>;
 }
 
+type AuthPhase = "initializing" | "checking_admin" | "ready";
+
 export const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [phase, setPhase] = useState<AuthPhase>("initializing");
+  const authRunId = useRef(0);
 
-  // Prevent double RPC: once onAuthStateChange fires, skip getSession's RPC
-  const adminChecked = useRef(false);
+  const syncAuthState = useCallback(async (nextSession: Session | null, source: "listener" | "bootstrap") => {
+    const currentRunId = ++authRunId.current;
 
-  const checkAdmin = useCallback(async (currentUser: User | null) => {
-    if (!currentUser) {
+    if (import.meta.env.DEV) {
+      console.info("[auth] sync start", { source, hasSession: !!nextSession, userId: nextSession?.user?.id ?? null });
+    }
+
+    setSession(nextSession);
+    setUser(nextSession?.user ?? null);
+
+    if (!nextSession?.user) {
       setIsAdmin(false);
+      setPhase("ready");
+      if (import.meta.env.DEV) console.info("[auth] no user, ready");
       return;
     }
-    if (adminChecked.current) return; // already checked for this session
-    adminChecked.current = true;
-    const { data } = await supabase.rpc("is_admin" as any);
-    setIsAdmin(!!data);
+
+    setPhase("checking_admin");
+
+    try {
+      const { data, error } = await supabase.rpc("is_admin");
+
+      if (currentRunId !== authRunId.current) return;
+
+      if (error) {
+        setIsAdmin(false);
+        if (import.meta.env.DEV) console.error("[auth] is_admin error", error);
+      } else {
+        setIsAdmin(Boolean(data));
+        if (import.meta.env.DEV) console.info("[auth] is_admin result", { isAdmin: Boolean(data) });
+      }
+    } catch (error) {
+      if (currentRunId !== authRunId.current) return;
+      setIsAdmin(false);
+      if (import.meta.env.DEV) console.error("[auth] is_admin exception", error);
+    } finally {
+      if (currentRunId === authRunId.current) {
+        setPhase("ready");
+      }
+    }
   }, []);
 
   useEffect(() => {
-    // 1. Set up listener FIRST
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, newSession) => {
-        setSession(newSession);
-        setUser(newSession?.user ?? null);
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      void syncAuthState(newSession, "listener");
+    });
 
-        if (!newSession?.user) {
-          setIsAdmin(false);
-          adminChecked.current = false;
-        } else {
-          adminChecked.current = false; // reset for new session
-          await checkAdmin(newSession.user);
-        }
-        setLoading(false);
-      }
-    );
-
-    // 2. THEN check existing session
-    supabase.auth.getSession().then(async ({ data: { session: existing } }) => {
-      setSession(existing);
-      setUser(existing?.user ?? null);
-      await checkAdmin(existing?.user ?? null);
-      setLoading(false);
+    supabase.auth.getSession().then(({ data: { session: existing } }) => {
+      void syncAuthState(existing, "bootstrap");
     });
 
     return () => subscription.unsubscribe();
-  }, [checkAdmin]);
+  }, [syncAuthState]);
 
   const signIn = useCallback(async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
-    // onAuthStateChange will handle the rest
   }, []);
 
   const signUp = useCallback(async (email: string, password: string) => {
@@ -79,8 +92,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     setSession(null);
     setIsAdmin(false);
-    adminChecked.current = false;
+    setPhase("ready");
+    authRunId.current += 1;
   }, []);
+
+  const loading = phase !== "ready";
 
   return (
     <AuthContext.Provider value={{ user, session, isAdmin, loading, signIn, signUp, signOut }}>
@@ -88,3 +104,4 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     </AuthContext.Provider>
   );
 }
+

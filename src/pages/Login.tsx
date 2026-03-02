@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,21 +20,44 @@ const Login = () => {
   const [honeypot, setHoneypot] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [mode, setMode] = useState<"login" | "register">("login");
-  const { user, isAdmin, signIn, signUp } = useAuth();
+  const [loginAttempted, setLoginAttempted] = useState(false);
+  const nonAdminToastShown = useRef(false);
+
+  const { user, isAdmin, loading, signIn, signUp } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
 
   useEffect(() => {
     if (user && isAdmin) {
+      if (import.meta.env.DEV) console.info("[login] redirect to /admin/clients");
       navigate("/admin/clients", { replace: true });
     }
   }, [user, isAdmin, navigate]);
+
+  useEffect(() => {
+    if (!loading && loginAttempted && user && !isAdmin && !nonAdminToastShown.current) {
+      nonAdminToastShown.current = true;
+      toast({
+        variant: "destructive",
+        title: "Akses ditolak",
+        description: "Akun Anda tidak memiliki akses admin.",
+      });
+    }
+  }, [loading, loginAttempted, user, isAdmin, toast]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     // Honeypot check — bots fill hidden fields
-    if (honeypot) return;
+    if (honeypot) {
+      toast({
+        variant: "destructive",
+        title: "Form tidak valid",
+        description: "Silakan isi form secara manual lalu coba lagi.",
+      });
+      setHoneypot("");
+      return;
+    }
 
     const result = loginSchema.safeParse({ email, password });
     if (!result.success) {
@@ -49,8 +72,13 @@ const Login = () => {
     setSubmitting(true);
     try {
       if (mode === "login") {
+        setLoginAttempted(true);
+        nonAdminToastShown.current = false;
+        if (import.meta.env.DEV) console.info("[login] signIn start", { email });
         await signIn(email, password);
+        if (import.meta.env.DEV) console.info("[login] signIn success");
       } else {
+        setLoginAttempted(false);
         await signUp(email, password);
         toast({
           title: "Registrasi berhasil",
@@ -59,6 +87,7 @@ const Login = () => {
         setMode("login");
       }
     } catch (err: any) {
+      if (import.meta.env.DEV) console.error("[login] auth error", err);
       toast({
         variant: "destructive",
         title: mode === "login" ? "Login gagal" : "Registrasi gagal",
@@ -120,8 +149,8 @@ const Login = () => {
               maxLength={128}
             />
           </div>
-          <Button type="submit" className="w-full" disabled={submitting}>
-            {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          <Button type="submit" className="w-full" disabled={submitting || loading}>
+            {(submitting || loading) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             {mode === "login" ? "Masuk" : "Daftar"}
           </Button>
         </form>
