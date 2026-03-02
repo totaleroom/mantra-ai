@@ -21,6 +21,7 @@
 - **Edit Client**: Klik ikon edit pada baris client untuk mengubah data
 - **Hapus Client**: Klik ikon hapus, konfirmasi penghapusan
 - **Filter & Cari**: Gunakan kolom pencarian untuk menemukan client berdasarkan nama
+- **Custom Prompt**: Atur system prompt AI per-client via menu dropdown
 - Setiap client memiliki quota pesan yang bisa diatur sesuai paket langganan
 
 ### 3. Menghubungkan WhatsApp Device
@@ -28,15 +29,22 @@
 **Lokasi:** Dashboard → **Device & Connection** (`/admin/devices`)
 
 1. Pilih client yang ingin dihubungkan
-2. Klik "Connect Device" — sistem akan menampilkan QR Code
+2. Klik "Buat Instance" — sistem akan menampilkan QR Code
 3. Buka WhatsApp di HP → Settings → Linked Devices → Link a Device
 4. Scan QR Code yang ditampilkan di dashboard
 5. Status akan berubah menjadi "Connected" setelah berhasil
 6. Bot AI akan otomatis membalas pesan masuk sesuai knowledge base
 
+**Fitur Tambahan:**
+- **Test Semua Koneksi**: Cek health Evolution API, webhook, database, dan heartbeat dalam 1 klik
+- **Diagnostik Detail**: Lihat status per-instance (VPS vs DB), konfigurasi webhook, dan rekomendasi
+- **Diagnostik 2 Arah**: Verifikasi bahwa webhook bisa menerima event dari VPS (inbound verification)
+- **Reconnect Wizard**: Langkah-langkah guided (perbaiki webhook → restart → ambil QR) untuk instance bermasalah
+- **Sync dari VPS**: Import instance yang sudah ada di Evolution API server
+
 ### 4. Upload Knowledge Base
 
-**Lokasi:** Dashboard → **Knowledge Base** (`/admin/knowledge-base`)
+**Lokasi:** Dashboard → **Knowledge Base** (`/admin/knowledge`)
 
 1. Pilih client yang ingin ditambahkan knowledge base
 2. Klik "Upload Document"
@@ -44,6 +52,7 @@
 4. Sistem akan memproses dan memecah dokumen menjadi chunks
 5. Setelah status "Processed", bot sudah bisa menjawab pertanyaan berdasarkan dokumen
 6. Anda bisa upload multiple dokumen untuk satu client
+7. Atur **Role Tag** (gudang/owner) untuk memfilter konteks RAG
 
 ### 5. Monitoring Pesan & Billing
 
@@ -63,7 +72,13 @@
 3. Bot akan menjawab berdasarkan dokumen yang sudah di-upload
 4. Gunakan fitur ini untuk memastikan jawaban bot sesuai sebelum go-live
 
-> **Catatan**: Fitur Test Bot memerlukan edge function `test-rag` yang perlu dikonfigurasi terpisah.
+### 7. Inbox — Live Chat
+
+**Lokasi:** Dashboard → **Inbox** (`/admin/inbox`)
+
+- Lihat percakapan yang di-eskalasi ke admin (HUMAN handover)
+- Balas langsung dari dashboard tanpa perlu buka WhatsApp
+- Badge notifikasi di sidebar menunjukkan jumlah eskalasi aktif
 
 ---
 
@@ -72,18 +87,26 @@
 ```
 ┌─────────────────────┐
 │   Frontend (SPA)    │  React + Vite + TypeScript + Tailwind CSS
-│   Static Build      │  → dist/ folder
+│   Code-Split Lazy   │  → dist/ folder (per-page chunks)
 └────────┬────────────┘
          │ HTTPS
 ┌────────▼────────────┐
 │   Lovable Cloud     │  Authentication, Database, Edge Functions
 │   (Backend)         │  Real-time subscriptions, File storage
+└────────┬────────────┘
+         │
+┌────────▼────────────┐
+│   Evolution API     │  WhatsApp Business via QR pairing
+│   (VPS)             │  Webhook → Edge Function → AI → Reply
 └─────────────────────┘
 ```
 
 - **Frontend**: React 18 SPA dengan Vite, Tailwind CSS, shadcn/ui
+- **Code Splitting**: `React.lazy()` + `Suspense` untuk semua halaman admin & login
+- **Landing Optimization**: Komponen berat (Calculator, ChatDemo, FAQ) di-lazy via IntersectionObserver
 - **Backend**: Lovable Cloud (authentication, PostgreSQL database, edge functions)
-- **State Management**: TanStack React Query
+- **State Management**: TanStack React Query dengan konfigurasi global (retry:1, staleTime:30s)
+- **Error Handling**: React Error Boundary di AdminLayout mencegah crash propagasi
 - **Routing**: React Router v6
 
 ---
@@ -95,10 +118,10 @@
 ├── src/
 │   ├── assets/             # Gambar & media (imported via ES6)
 │   ├── components/
-│   │   ├── admin/          # Komponen dashboard admin
-│   │   ├── landing/        # Komponen landing page
+│   │   ├── admin/          # Komponen dashboard admin (AdminLayout, InstanceCard, dll)
+│   │   ├── landing/        # Komponen landing page (LazySection, ChatDemo, dll)
 │   │   └── ui/             # shadcn/ui components
-│   ├── hooks/              # Custom React hooks (useAuth, useMobile)
+│   ├── hooks/              # Custom React hooks (useAuth, useAdminData, useMobile)
 │   ├── integrations/       # Backend client & types (auto-generated)
 │   ├── lib/                # Utility functions
 │   ├── pages/              # Route pages
@@ -107,6 +130,13 @@
 ├── supabase/
 │   ├── config.toml         # Backend configuration (auto-managed)
 │   ├── functions/          # Edge functions (auto-deployed)
+│   │   ├── manage-wa-instance/  # CRUD instance + test-all + diagnostics
+│   │   ├── wa-webhook/          # Inbound webhook handler + AI reply + diagnostic ping
+│   │   ├── process-document/    # Chunking & embedding
+│   │   ├── test-rag/            # RAG testing endpoint
+│   │   ├── manage-settings/     # Platform settings CRUD
+│   │   ├── manage-admin/        # Admin user management
+│   │   └── wa-send-message/     # Outbound WA message
 │   └── migrations/         # Database migrations
 ├── index.html              # Entry point + SEO meta tags
 ├── tailwind.config.ts      # Tailwind configuration
@@ -255,9 +285,40 @@ sudo systemctl restart nginx
 | **Anti-Bot** | Honeypot field pada form login/register | ✅ Ready |
 | **SEO** | Meta tags, Open Graph, sitemap.xml, robots.txt | ✅ Ready |
 | **WhatsApp Integration** | QR code pairing, session management | ✅ Ready |
-| **Knowledge Base (RAG)** | Upload PDF/TXT, chunking, embedding | ✅ Ready |
+| **Knowledge Base (RAG)** | Upload PDF/TXT, chunking, embedding, role tags | ✅ Ready |
 | **Monitoring** | Message logs, token usage, billing alerts | ✅ Ready |
-| **Test Bot** | Test response RAG sebelum go-live | ⚠️ Perlu edge function |
+| **Test Bot** | Test response RAG sebelum go-live | ✅ Ready |
+| **Inbox / Live Chat** | Balas eskalasi langsung dari dashboard | ✅ Ready |
+| **Diagnostik 2 Arah** | Test koneksi Dashboard↔VPS secara bidirectional | ✅ Ready |
+| **Health Check** | Cek Evolution API, webhook, heartbeat, database | ✅ Ready |
+| **Reconnect Wizard** | Guided steps untuk recovery instance bermasalah | ✅ Ready |
+| **Ops Logs** | Audit trail semua operasi instance (wa_ops_logs) | ✅ Ready |
+| **Code Splitting** | Lazy-load halaman admin & komponen berat landing | ✅ Ready |
+| **Error Boundary** | Crash isolation per halaman admin | ✅ Ready |
+
+---
+
+## 📝 Changelog
+
+### v3.0.0 (2026-03-02)
+- **Performance**: Code splitting dengan React.lazy untuk semua halaman admin
+- **Performance**: Lazy-load komponen landing berat (ChatDemo, Calculator, FAQ) via IntersectionObserver
+- **Stability**: QueryClient default config (retry:1, staleTime:30s, no refetchOnWindowFocus)
+- **Stability**: DeviceManager migrasi ke React Query + realtime invalidation
+- **Stability**: Error Boundary di AdminLayout mencegah crash propagasi
+- **Stability**: Fix InstanceCard useEffect dependency array & cleanup
+- **Bridge**: Standarisasi pemanggilan edge function via VITE_SUPABASE_URL
+- **Docs**: README diperbarui dengan semua fitur terbaru
+
+### v2.5.0
+- Diagnostik 2 arah (inbound webhook verification)
+- Reconnect Wizard untuk instance bermasalah
+- Ops Logs (wa_ops_logs) untuk audit trail
+
+### v2.4.0
+- Inbox live chat dengan eskalasi HUMAN
+- Custom prompt per-client
+- Role tag pada knowledge base
 
 ---
 
@@ -268,6 +329,7 @@ sudo systemctl restart nginx
 - **Honeypot** anti-bot pada form login
 - **Input validation** menggunakan Zod schema
 - **Email verification** wajib sebelum bisa login
+- **Webhook secret** untuk verifikasi event WhatsApp
 
 ---
 

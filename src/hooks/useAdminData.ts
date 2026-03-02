@@ -446,3 +446,40 @@ export function useDocuments(filterClientId: string, clients: { id: string; name
     enabled: clients.length > 0 || filterClientId === "all",
   });
 }
+
+// ── Device Manager: Sessions per client (with realtime) ──
+export function useDeviceSessions(clientId: string) {
+  const queryClient = useQueryClient();
+
+  const query = useQuery({
+    queryKey: ["deviceSessions", clientId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("wa_sessions" as any)
+        .select("*")
+        .eq("client_id", clientId);
+      if (error) throw error;
+      return (data as any[]) || [];
+    },
+    enabled: !!clientId,
+    staleTime: 15_000,
+  });
+
+  useEffect(() => {
+    if (!clientId) return;
+    const channel = supabase
+      .channel(`rq-device-${clientId}`)
+      .on("postgres_changes", {
+        event: "*",
+        schema: "public",
+        table: "wa_sessions",
+        filter: `client_id=eq.${clientId}`,
+      }, () => {
+        queryClient.invalidateQueries({ queryKey: ["deviceSessions", clientId] });
+      })
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [clientId, queryClient]);
+
+  return query;
+}

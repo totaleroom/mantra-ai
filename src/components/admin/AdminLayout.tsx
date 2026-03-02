@@ -1,6 +1,7 @@
 import { Outlet, useLocation } from "react-router-dom";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import AdminSidebar from "./AdminSidebar";
+import ErrorBoundary from "@/components/ErrorBoundary";
 
 const pageTitles: Record<string, string> = {
   "/admin": "Control Tower",
@@ -28,7 +29,9 @@ export default function AdminLayout() {
             )}
           </header>
           <div className="p-6">
-            <Outlet />
+            <ErrorBoundary>
+              <Outlet />
+            </ErrorBoundary>
           </div>
         </main>
       </div>

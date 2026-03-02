@@ -46,7 +46,7 @@ export default function InstanceCard({ session, actionLoading, onAction }: Insta
       timerRef.current = setInterval(() => {
         setCountdown(prev => {
           if (prev <= 1) {
-            clearInterval(timerRef.current!);
+            if (timerRef.current) clearInterval(timerRef.current);
             timerRef.current = null;
             setAutoRefreshCount(c => c + 1);
             onAction("connect", name);
@@ -56,8 +56,13 @@ export default function InstanceCard({ session, actionLoading, onAction }: Insta
         });
       }, 1000);
     }
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [session.status, session.qr_code, autoRefreshCount]);
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [session.status, session.qr_code, autoRefreshCount, isAnyLoading, name, onAction]);
 
   // Reset auto-refresh when status changes from connecting
   useEffect(() => {
