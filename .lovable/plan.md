@@ -1,145 +1,145 @@
 
-Tujuan: menyelesaikan masalah QR yang belum muncul, memastikan proses reconnect/delete lebih stabil, dan meningkatkan UI/UX dashboard agar troubleshooting bisa cepat tanpa tebak-tebakan.
+Tujuan utama: membuat proses troubleshooting QR WhatsApp menjadi cepat, terukur, dan bisa dijalankan dari dashboard tanpa tebak-tebakan.
 
-Kondisi yang sudah terverifikasi dari sistem saat ini (berdasarkan kode + log):
-1) Evolution service kemungkinan besar aktif
-- Ada banyak event masuk ke backend function webhook: `Connection update: totale_bot connecting`.
-- Artinya server Evolution masih mengirim callback ke backend.
+Apa yang sudah terverifikasi dari sistem saat ini:
+1) Koneksi webhook dari Evolution ke backend aktif.
+- Log menunjukkan event berulang: `Connection update: totale_bot connecting`.
+- Artinya endpoint webhook menerima callback dari server Evolution.
 
-2) Webhook sudah “hidup”, tapi QR event tidak terlihat
-- Log webhook menunjukkan event `connection.update` berulang, tetapi tidak ada log `qrcode.updated`.
-- Ini indikasi utama kenapa UI tidak menampilkan QR.
+2) Konfigurasi backend untuk Evolution sudah terisi.
+- Setting `evolution_api_url`, `evolution_api_key`, dan `wa_webhook_secret` terdeteksi “set”.
 
-3) Struktur database masih membatasi multi-instance per client
-- Tabel `wa_sessions` masih punya constraint `UNIQUE (client_id)`.
-- Ini bertentangan dengan UI yang sudah didesain multi-instance; risiko sync/create gagal untuk instance ke-2, ke-3.
+3) Struktur database utama sudah benar untuk multi-instance.
+- `wa_sessions` sudah pakai unique komposit `(client_id, instance_name)`.
+- Status valid sudah mencakup `connected/disconnected/connecting/error`.
+- Jadi blocker lama (constraint) sudah tidak jadi penyebab utama.
 
-4) Ada mismatch format payload webhook antar endpoint/versi Evolution
-- Di `manage-wa-instance`, payload webhook di action `create` masih format lama (`byEvents`, `base64` di objek nested `webhook`).
-- Sementara di action `sync` memakai format camelCase untuk endpoint `/webhook/set/{instance}`.
-- Log historis menunjukkan error `instance requires property "webhook"` saat set webhook; jadi perlu kompatibilitas dua format payload.
+4) Kondisi runtime saat ini:
+- `wa_sessions` saat ini hanya ada 1 instance (`totale_bot`) dengan `status=disconnected`, `has_qr=false`, dan `last_error` berisi “QR belum tersedia...”.
+- Log tidak menunjukkan `qrcode.updated`, hanya `connection.update`.
 
-5) UX troubleshooting masih belum cukup “operasional”
-- User belum dapat satu layar yang menjawab cepat:
-  - “Evolution aktif atau tidak?”
-  - “Webhook nyambung atau tidak?”
-  - “QR kenapa belum keluar?”
-  - “Langkah reconnect selanjutnya apa?”
+Analisis akar masalah yang paling mungkin:
+A) Event QR tidak diproses konsisten (alias event + bentuk payload QR belum cukup luas).
+- Handler webhook saat ini hanya mengecek `event === "qrcode.updated"` dan field QR tertentu.
+- Jika Evolution mengirim variasi nama event/payload lain, QR tidak pernah tersimpan.
 
-Rencana implementasi yang saya sarankan:
+B) Mapping status pada webhook membuat state “connecting” hilang.
+- `connection.update` sekarang diubah jadi:
+  - `open` => `connected`
+  - selain itu => `disconnected`
+- Akibatnya saat Evolution kirim “connecting”, UI dianggap “disconnected”, sehingga alur auto-refresh/recovery jadi kurang natural dan membingungkan.
 
-Fase 1 — Stabilkan fondasi data & lifecycle instance
-1. Ubah constraint multi-instance (database migration)
-- Drop unique lama: `wa_sessions_client_id_key`.
-- Ganti dengan unique komposit: `(client_id, instance_name)` agar satu client bisa punya banyak instance.
-- Tambah index operasional:
-  - `(client_id, updated_at desc)`
-  - `(instance_name)`
+C) Belum ada “single source of truth” observability.
+- Sudah ada Health Check basic, tapi belum ada satu endpoint “Test Semua Koneksi” yang menguji: reachability, webhook per instance, state instance, ketersediaan QR, dan ringkasan rekomendasi tindakan.
+- Dashboard belum menampilkan heartbeat terakhir webhook + ringkasan konektivitas operasional lintas instance.
 
-2. Rapikan status machine
-- Status yang dipakai konsisten: `disconnected | connecting | connected | error`.
-- Semua action (`create`, `sync`, `connect`, `restart`, `logout`, `delete`) mengisi status secara deterministik.
-- Tambah `last_error` opsional (text) agar penyebab gagal tampil di dashboard (tidak cuma “failed to fetch”).
+D) Error UX masih kurang actionable di beberapa jalur.
+- “Failed to fetch” dari browser/network masih mungkin muncul tanpa klasifikasi cepat (auth timeout, function unavailable, evolution timeout, dns/ssl, dll).
 
-Fase 2 — Hardening backend function untuk reconnect & QR
-1. Normalisasi webhook configuration (kompatibilitas Evolution)
-- Buat helper `setWebhookWithFallback(instanceName)`:
-  - Coba payload format A (camelCase flat).
-  - Jika gagal dengan error schema tertentu, fallback ke payload format B (nested `webhook`).
-- Simpan hasil attempt + response singkat ke log backend (structured log).
+Rencana implementasi (yang akan saya eksekusi setelah Anda approve):
 
-2. Perbaiki action `create` agar format webhook konsisten dengan fallback yang sama
-- Hindari mismatch antar `create` vs `sync`.
+Fase 1 — Hardening backend function untuk diagnosis & QR reliability
+1. Perkuat parser event di `wa-webhook`:
+- Terima alias event umum: `qrcode.updated`, `QRCODE_UPDATED`, variasi key `event/type`.
+- Perluas ekstraksi QR dari beberapa struktur payload (direct, nested, code/base64, dsb).
+- Jika event QR diterima tapi QR kosong, tulis reason ringkas ke log operasional.
 
-3. Perkuat action `connect`
-- Parsing QR multi-bentuk response:
-  - `code`
-  - `base64`
-  - `qrcode.code`
-  - `qrcode.base64`
-- Jika QR null:
-  - cek connection state endpoint,
-  - jika masih `connecting`, trigger retry terkontrol (short retry + backoff),
-  - jika tetap null, return error manusiawi + saran tindakan.
+2. Perbaiki state machine webhook:
+- Mapping status lebih akurat:
+  - `open/connected` => `connected`
+  - `connecting` => `connecting`
+  - `close/disconnected` => `disconnected`
+  - unknown/error => `error` + `last_error` ringkas
+- Ini membuat UI mencerminkan kondisi real dan auto-refresh bekerja sesuai desain.
 
-4. Tambah action diagnosis cepat
-- `action=health-check` mengembalikan:
-  - evolution_reachable (true/false)
-  - fetch_instances_ok
-  - webhook_find_ok per instance (jika tersedia endpoint)
-  - last webhook event timestamp yang diketahui
-  - reason ringkas jika gagal
-- Ini jadi fondasi UI “status kesehatan”.
+3. Tambah endpoint diagnostik komprehensif di `manage-wa-instance`:
+- `action=diagnostics` (global + per instance), memuat:
+  - evolution_reachable + latency estimasi
+  - total instance di Evolution
+  - webhook configured/enabled/url per instance
+  - connection state per instance
+  - qr_available per instance (berdasarkan connect/state check aman/read-only semampunya)
+  - rekomendasi langkah otomatis (mis. “set-webhook -> restart -> fetch-qr”)
 
-Fase 3 — Dashboard UX yang user-friendly untuk maintenance cepat
-1. Tambah panel “Kesehatan Integrasi” di Device Manager
-- Badge hijau/kuning/merah:
-  - Evolution API reachable
-  - Webhook configured
-  - Last event age (mis. “30 detik lalu”)
-  - QR readiness
+4. Tambah endpoint `action=test-all` (one-click test):
+- Menjalankan rangkaian check non-destruktif berurutan.
+- Return summary dengan severity (`ok/warn/error`) per komponen.
 
-2. Tambah wizard “Reconnect Cepat” per instance
-- Step-by-step tombol:
-  1) Cek koneksi Evolution
-  2) Set/Uji webhook
-  3) Restart instance
-  4) Ambil QR ulang
-- Setiap step menampilkan hasil jelas (OK/Gagal + alasan).
+Fase 2 — Observability data model (ringan, fokus maintenance)
+1. Tambah tabel log operasional (mis. `wa_ops_logs`) untuk jejak audit:
+- Kolom: timestamp, instance_name, action, status, latency_ms, error_code, error_message, metadata json.
+- RLS admin-only (konsisten pola tabel lain).
 
-3. Perbaiki pesan error menjadi tindakan konkret
-- Dari “Failed to fetch” menjadi:
-  - “Server Evolution tidak bisa diakses”
-  - “Webhook belum terpasang”
-  - “Instance terkunci di status connecting”
-  - “Instance tidak ditemukan di VPS”
-- Sertakan CTA langsung: “Coba Reconnect Wizard”, “Lihat Diagnostik”, “Sync Ulang”.
+2. Tambah “heartbeat” webhook:
+- Saat webhook menerima event, simpan `last_webhook_event_at` per instance (atau global di settings/log).
+- Ini menjawab pertanyaan “service masih nyambung tidak” secara cepat.
 
-4. Tambah auto-refresh QR yang aman
-- Saat status `connecting`, auto-refresh terbatas (mis. tiap 10 detik, max 6x) dengan countdown.
-- Tombol manual tetap ada.
+Fase 3 — Upgrade UI/UX dashboard operasional
+1. Device Manager: panel “Test Semua Koneksi”
+- Tombol satu klik untuk panggil `test-all`.
+- Menampilkan:
+  - Evolution reachable
+  - webhook status
+  - jumlah connected/connecting/disconnected/error
+  - last webhook heartbeat
+  - daftar aksi yang direkomendasikan
 
-Fase 4 — Mitigasi risiko operasional
-1. Idempotent operations
-- `delete-all`, `sync`, `set-webhook` harus aman dijalankan berulang.
-- Operasi gagal sebagian tidak membuat state membingungkan.
+2. Device Manager: ringkasan KPI yang Anda minta
+- Connected clients
+- Disconnected clients
+- Connecting clients
+- Error instances
+- Total instance di Evolution vs total di database
 
-2. Retry policy
-- Retry hanya untuk network/transient error, bukan semua error.
-- Backoff ringan dan berhenti dengan error terjelas.
+3. Device Manager: hasil diagnostik per instance (expandable)
+- Status koneksi terakhir
+- Webhook state
+- Last error
+- Last event age
+- Tombol aksi cepat: Set Webhook, Restart, Fetch QR, Reconnect Wizard
 
-3. Operational logging minimal
-- Simpan log ringkas per aksi (instance, action, status, error, latency) agar root-cause cepat.
+4. UX error handling yang lebih ramah
+- Klasifikasi error:
+  - auth/session expired
+  - function tidak tersedia
+  - Evolution unreachable/timeout
+  - instance tidak ditemukan
+- Copywriting tindakan jelas (apa yang harus diklik berikutnya).
 
-4. Guardrail admin
-- Semua aksi destruktif tetap pakai konfirmasi + detail dampak.
-- Tombol “Hapus Semua” tampilkan jumlah instance target sebelum eksekusi.
+Fase 4 — Runbook terintegrasi untuk maintenance cepat
+1. Alur standar 60 detik:
+- Klik “Test Semua Koneksi”
+- Jika Evolution unreachable => cek VPS service/network
+- Jika webhook invalid => “Perbaiki Webhook”
+- Jika state stuck connecting => “Restart + Fetch QR”
+- Jika masih gagal => buka detail log instance + export ringkas
 
-Runbook maintenance (yang nanti ditanam di UI “Bantuan Cepat”):
-1) Klik “Health Check”
-2) Jika Evolution unreachable → cek service VPS/network
-3) Jika webhook invalid → klik “Perbaiki Webhook”
-4) Jika status stuck `connecting` > 2 menit → “Restart + Fetch QR”
-5) Jika QR tetap null → jalankan “Reconnect Wizard”
-6) Jika masih gagal → tampilkan detail error + ekspor log teknis singkat
+2. Idempotent & safe operations:
+- Semua aksi recovery aman dijalankan berulang.
+- Operasi destruktif tetap confirm dialog + dampak jelas.
 
 Menjawab pertanyaan Anda secara langsung:
-- “Apakah saya melakukan kesalahan?”  
-  Kemungkinan besar bukan kesalahan penggunaan. Dari data saat ini, masalah lebih ke reliability arsitektur (format payload webhook, constraint multi-instance, dan kurangnya alur diagnosis otomatis).
-- “Apakah Evolution aktif?”  
-  Indikasinya aktif karena event `connection.update` terus masuk.
-- “Perlu pembaruan UI/UX?”  
-  Ya, sangat perlu. Fokusnya bukan kosmetik, tapi “operational UX” supaya proses recovery bisa cepat, jelas, dan repeatable.
+- “Ada salah di mana?”
+  Kemungkinan bukan di penggunaan Anda. Problem utama saat ini lebih ke reliability operasional (event QR tidak terbaca konsisten + status mapping + observability belum lengkap).
 
-File yang akan terdampak saat implementasi (setelah Anda approve eksekusi):
-1) `supabase/migrations/...` (constraint multi-instance + index)
-2) `supabase/functions/manage-wa-instance/index.ts` (health-check, reconnect flow, payload fallback, error model)
-3) `src/pages/admin/DeviceManager.tsx` (health panel, reconnect wizard, better errors, auto-refresh QR)
-4) `src/components/admin/InstanceCard.tsx` (status detail + guided reconnect actions)
-5) opsional: tabel log operasional jika Anda setuju menambah jejak audit troubleshooting
+- “API sudah benar/terhubung ke VPS?”
+  Indikasi terhubung: webhook menerima event `connection.update` berulang. Jadi jalur koneksi dasar aktif.
+
+- “Bisa tahu info koneksi/ping/status/connected-disconnected di dashboard?”
+  Ya, perlu dan bisa. Saya akan satukan lewat panel “Test Semua Koneksi” + KPI status + heartbeat + rekomendasi aksi.
+
+- “Perlu pembaruan UI/UX?”
+  Ya, dan ini prioritas tinggi. Fokusnya operational UX (diagnostik + recovery cepat), bukan kosmetik.
+
+File yang akan terdampak saat implementasi:
+1) `supabase/functions/wa-webhook/index.ts` (event alias, QR parser, status mapping, heartbeat logging)
+2) `supabase/functions/manage-wa-instance/index.ts` (diagnostics + test-all + enriched error model)
+3) `supabase/migrations/...` (tabel log operasional + indeks + RLS policy admin-only)
+4) `src/pages/admin/DeviceManager.tsx` (panel test-all, KPI status, diagnostic summary, actionable errors)
+5) `src/components/admin/InstanceCard.tsx` (detail status instance, per-instance diagnostics, quick actions)
 
 Kriteria sukses:
-- User bisa melihat daftar instance dengan benar (multi-instance stabil).
-- QR muncul konsisten saat reconnect.
-- Error tidak lagi generik “failed to fetch”.
-- Admin bisa menyelesaikan mayoritas insiden dari dashboard tanpa akses manual ke VPS.
+- QR muncul konsisten pada flow reconnect yang benar.
+- Tidak ada kebingungan “sudah nyambung atau belum” karena heartbeat/status jelas.
+- Admin bisa mendeteksi sumber masalah dalam 1 layar (<1 menit).
+- Troubleshooting jadi repeatable dengan runbook bawaan dashboard.
