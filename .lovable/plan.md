@@ -1,145 +1,155 @@
 
-Tujuan utama: membuat proses troubleshooting QR WhatsApp menjadi cepat, terukur, dan bisa dijalankan dari dashboard tanpa tebak-tebakan.
 
-Apa yang sudah terverifikasi dari sistem saat ini:
-1) Koneksi webhook dari Evolution ke backend aktif.
-- Log menunjukkan event berulang: `Connection update: totale_bot connecting`.
-- Artinya endpoint webhook menerima callback dari server Evolution.
+# Audit Performa, Stabilitas & Dokumentasi — MANTRA AI
 
-2) Konfigurasi backend untuk Evolution sudah terisi.
-- Setting `evolution_api_url`, `evolution_api_key`, dan `wa_webhook_secret` terdeteksi “set”.
+## Ringkasan
 
-3) Struktur database utama sudah benar untuk multi-instance.
-- `wa_sessions` sudah pakai unique komposit `(client_id, instance_name)`.
-- Status valid sudah mencakup `connected/disconnected/connecting/error`.
-- Jadi blocker lama (constraint) sudah tidak jadi penyebab utama.
+Prompt Anda yang sudah saya perbaiki:
+> "Lakukan audit menyeluruh terhadap: (1) struktur teknis dan arsitektur kode, (2) kecepatan loading & performa halaman, (3) stabilitas dashboard dan pembatasan agar tidak lag, (4) efisiensi komunikasi frontend-backend, (5) optimasi ukuran bundle tanpa merusak fungsionalitas, dan (6) perbarui README serta dokumentasi agar mencerminkan kondisi terkini."
 
-4) Kondisi runtime saat ini:
-- `wa_sessions` saat ini hanya ada 1 instance (`totale_bot`) dengan `status=disconnected`, `has_qr=false`, dan `last_error` berisi “QR belum tersedia...”.
-- Log tidak menunjukkan `qrcode.updated`, hanya `connection.update`.
+Berikut temuan dan rencana perbaikan berdasarkan audit kode:
 
-Analisis akar masalah yang paling mungkin:
-A) Event QR tidak diproses konsisten (alias event + bentuk payload QR belum cukup luas).
-- Handler webhook saat ini hanya mengecek `event === "qrcode.updated"` dan field QR tertentu.
-- Jika Evolution mengirim variasi nama event/payload lain, QR tidak pernah tersimpan.
+---
 
-B) Mapping status pada webhook membuat state “connecting” hilang.
-- `connection.update` sekarang diubah jadi:
-  - `open` => `connected`
-  - selain itu => `disconnected`
-- Akibatnya saat Evolution kirim “connecting”, UI dianggap “disconnected”, sehingga alur auto-refresh/recovery jadi kurang natural dan membingungkan.
+## Temuan Audit
 
-C) Belum ada “single source of truth” observability.
-- Sudah ada Health Check basic, tapi belum ada satu endpoint “Test Semua Koneksi” yang menguji: reachability, webhook per instance, state instance, ketersediaan QR, dan ringkasan rekomendasi tindakan.
-- Dashboard belum menampilkan heartbeat terakhir webhook + ringkasan konektivitas operasional lintas instance.
+### A. Performa & Kecepatan Loading
 
-D) Error UX masih kurang actionable di beberapa jalur.
-- “Failed to fetch” dari browser/network masih mungkin muncul tanpa klasifikasi cepat (auth timeout, function unavailable, evolution timeout, dns/ssl, dll).
+**Masalah 1: Semua halaman di-import secara eager (tidak ada code splitting)**
+- `App.tsx` meng-import 7 halaman admin + landing + login secara langsung.
+- Landing page saja sudah memuat 15 komponen sekaligus.
+- Akibatnya: bundle JavaScript yang dikirim ke browser sangat besar, meskipun user hanya buka satu halaman.
 
-Rencana implementasi (yang akan saya eksekusi setelah Anda approve):
+**Masalah 2: Dashboard memuat 9 query sekaligus saat pertama buka**
+- `Dashboard.tsx` memanggil 9 custom hooks (`useAttentionItems`, `useSystemHealth`, `useClients`, dll) yang semua jalan paralel.
+- Ini tidak salah secara teknis, tapi tanpa prioritas visual (mana yang muncul dulu di layar) bisa terasa lambat.
 
-Fase 1 — Hardening backend function untuk diagnosis & QR reliability
-1. Perkuat parser event di `wa-webhook`:
-- Terima alias event umum: `qrcode.updated`, `QRCODE_UPDATED`, variasi key `event/type`.
-- Perluas ekstraksi QR dari beberapa struktur payload (direct, nested, code/base64, dsb).
-- Jika event QR diterima tapi QR kosong, tulis reason ringkas ke log operasional.
+**Masalah 3: DeviceManager.tsx tidak pakai React Query**
+- `DeviceManager.tsx` (555 baris) masih pakai `useState` + `useEffect` manual untuk fetch data.
+- Ini berarti: tidak ada caching, tidak ada deduplication, setiap navigasi ulang akan fetch ulang dari nol.
+- Halaman admin lain sudah pakai React Query.
 
-2. Perbaiki state machine webhook:
-- Mapping status lebih akurat:
-  - `open/connected` => `connected`
-  - `connecting` => `connecting`
-  - `close/disconnected` => `disconnected`
-  - unknown/error => `error` + `last_error` ringkas
-- Ini membuat UI mencerminkan kondisi real dan auto-refresh bekerja sesuai desain.
+### B. Stabilitas & Anti-Lag
 
-3. Tambah endpoint diagnostik komprehensif di `manage-wa-instance`:
-- `action=diagnostics` (global + per instance), memuat:
-  - evolution_reachable + latency estimasi
-  - total instance di Evolution
-  - webhook configured/enabled/url per instance
-  - connection state per instance
-  - qr_available per instance (berdasarkan connect/state check aman/read-only semampunya)
-  - rekomendasi langkah otomatis (mis. “set-webhook -> restart -> fetch-qr”)
+**Masalah 4: Realtime channel di DeviceManager tidak dibatasi**
+- Setiap kali ganti client, channel baru dibuat tanpa debounce.
+- Jika user cepat ganti-ganti client, bisa terjadi tumpukan channel.
 
-4. Tambah endpoint `action=test-all` (one-click test):
-- Menjalankan rangkaian check non-destruktif berurutan.
-- Return summary dengan severity (`ok/warn/error`) per komponen.
+**Masalah 5: InstanceCard auto-refresh tanpa cleanup yang solid**
+- `setInterval` di InstanceCard bisa race condition jika komponen unmount saat timer aktif.
+- Dependency array `useEffect` tidak lengkap (miss `name`, `isAnyLoading`).
 
-Fase 2 — Observability data model (ringan, fokus maintenance)
-1. Tambah tabel log operasional (mis. `wa_ops_logs`) untuk jejak audit:
-- Kolom: timestamp, instance_name, action, status, latency_ms, error_code, error_message, metadata json.
-- RLS admin-only (konsisten pola tabel lain).
+**Masalah 6: QueryClient dibuat tanpa konfigurasi default**
+- Tidak ada `defaultOptions` untuk retry, staleTime, atau error handling global.
+- Jika backend lambat, query akan retry 3x secara default tanpa user tahu.
 
-2. Tambah “heartbeat” webhook:
-- Saat webhook menerima event, simpan `last_webhook_event_at` per instance (atau global di settings/log).
-- Ini menjawab pertanyaan “service masih nyambung tidak” secara cepat.
+### C. Frontend-Backend Bridge
 
-Fase 3 — Upgrade UI/UX dashboard operasional
-1. Device Manager: panel “Test Semua Koneksi”
-- Tombol satu klik untuk panggil `test-all`.
-- Menampilkan:
-  - Evolution reachable
-  - webhook status
-  - jumlah connected/connecting/disconnected/error
-  - last webhook heartbeat
-  - daftar aksi yang direkomendasikan
+**Masalah 7: `callManageInstance` di DeviceManager membangun URL secara manual**
+- Tidak pakai `supabase.functions.invoke()` yang sudah ada.
+- Ini membuat penanganan auth token, error, dan URL tidak konsisten dengan halaman lain.
 
-2. Device Manager: ringkasan KPI yang Anda minta
-- Connected clients
-- Disconnected clients
-- Connecting clients
-- Error instances
-- Total instance di Evolution vs total di database
+**Masalah 8: Type casting `as any` di mana-mana**
+- `useAdminData.ts` menggunakan `.from("clients" as any)` di setiap query.
+- Ini menghilangkan type safety dan bisa menyembunyikan bug.
 
-3. Device Manager: hasil diagnostik per instance (expandable)
-- Status koneksi terakhir
-- Webhook state
-- Last error
-- Last event age
-- Tombol aksi cepat: Set Webhook, Restart, Fetch QR, Reconnect Wizard
+### D. Ukuran yang Bisa Dioptimasi
 
-4. UX error handling yang lebih ramah
-- Klasifikasi error:
-  - auth/session expired
-  - function tidak tersedia
-  - Evolution unreachable/timeout
-  - instance tidak ditemukan
-- Copywriting tindakan jelas (apa yang harus diklik berikutnya).
+**Masalah 9: Landing page memuat semua 15 section sekaligus**
+- Komponen seperti `ROICalculator`, `AdminCostCalculator`, `FAQ` tidak perlu dimuat sampai user scroll ke sana.
 
-Fase 4 — Runbook terintegrasi untuk maintenance cepat
-1. Alur standar 60 detik:
-- Klik “Test Semua Koneksi”
-- Jika Evolution unreachable => cek VPS service/network
-- Jika webhook invalid => “Perbaiki Webhook”
-- Jika state stuck connecting => “Restart + Fetch QR”
-- Jika masih gagal => buka detail log instance + export ringkas
+**Masalah 10: Edge function `wa-webhook` dan `manage-wa-instance` sangat besar**
+- `wa-webhook`: 768 baris, `manage-wa-instance`: 929 baris.
+- Ini bukan masalah bundle frontend, tapi maintainability dan cold-start time backend.
 
-2. Idempotent & safe operations:
-- Semua aksi recovery aman dijalankan berulang.
-- Operasi destruktif tetap confirm dialog + dampak jelas.
+### E. Dokumentasi
 
-Menjawab pertanyaan Anda secara langsung:
-- “Ada salah di mana?”
-  Kemungkinan bukan di penggunaan Anda. Problem utama saat ini lebih ke reliability operasional (event QR tidak terbaca konsisten + status mapping + observability belum lengkap).
+**Masalah 11: README belum mencerminkan fitur terbaru**
+- Belum ada dokumentasi tentang: diagnostik 2 arah, health check, reconnect wizard, wa_ops_logs.
+- Versi "V2.4.0" di Dashboard hardcoded tapi tidak ada changelog.
 
-- “API sudah benar/terhubung ke VPS?”
-  Indikasi terhubung: webhook menerima event `connection.update` berulang. Jadi jalur koneksi dasar aktif.
+---
 
-- “Bisa tahu info koneksi/ping/status/connected-disconnected di dashboard?”
-  Ya, perlu dan bisa. Saya akan satukan lewat panel “Test Semua Koneksi” + KPI status + heartbeat + rekomendasi aksi.
+## Rencana Implementasi
 
-- “Perlu pembaruan UI/UX?”
-  Ya, dan ini prioritas tinggi. Fokusnya operational UX (diagnostik + recovery cepat), bukan kosmetik.
+### Fase 1 — Code Splitting & Lazy Loading (Kecepatan)
 
-File yang akan terdampak saat implementasi:
-1) `supabase/functions/wa-webhook/index.ts` (event alias, QR parser, status mapping, heartbeat logging)
-2) `supabase/functions/manage-wa-instance/index.ts` (diagnostics + test-all + enriched error model)
-3) `supabase/migrations/...` (tabel log operasional + indeks + RLS policy admin-only)
-4) `src/pages/admin/DeviceManager.tsx` (panel test-all, KPI status, diagnostic summary, actionable errors)
-5) `src/components/admin/InstanceCard.tsx` (detail status instance, per-instance diagnostics, quick actions)
+1. **Lazy-load semua halaman admin**
+   - Ubah import di `App.tsx` menjadi `React.lazy()` + `Suspense`.
+   - Halaman yang di-lazy: Dashboard, Clients, DeviceManager, KnowledgeBase, Monitoring, Inbox, Settings.
+   - Landing page dan Login juga di-lazy.
+   - Ini akan memecah bundle menjadi chunk terpisah per halaman.
 
-Kriteria sukses:
-- QR muncul konsisten pada flow reconnect yang benar.
-- Tidak ada kebingungan “sudah nyambung atau belum” karena heartbeat/status jelas.
-- Admin bisa mendeteksi sumber masalah dalam 1 layar (<1 menit).
-- Troubleshooting jadi repeatable dengan runbook bawaan dashboard.
+2. **Tambah loading fallback yang konsisten**
+   - Buat komponen `PageLoader` sederhana (skeleton/spinner) untuk `Suspense fallback`.
+
+### Fase 2 — Stabilitas Dashboard
+
+3. **Migrasi DeviceManager ke React Query**
+   - Pindahkan fetch clients dan sessions ke hook di `useAdminData.ts`.
+   - Gunakan `useQuery` dengan `staleTime` dan caching.
+   - Ini menghilangkan fetch ulang setiap navigasi.
+
+4. **Konfigurasi QueryClient dengan default yang wajar**
+   - Tambah `defaultOptions`:
+     - `retry: 1` (bukan 3)
+     - `staleTime: 30_000` (30 detik)
+     - `refetchOnWindowFocus: false` (tidak refetch saat tab kembali aktif)
+   - Ini mencegah request berlebihan saat user multitab.
+
+5. **Perbaiki dependency array di InstanceCard**
+   - Tambahkan `name` dan `isAnyLoading` ke dependency.
+   - Pastikan cleanup timer solid.
+
+### Fase 3 — Frontend-Backend Bridge
+
+6. **Ganti `callManageInstance` dengan `supabase.functions.invoke`**
+   - Ini menstandarkan auth handling dan error parsing.
+   - Lebih konsisten dengan pattern di halaman lain (Settings, KnowledgeBase).
+
+7. **Tambah error boundary global**
+   - Bungkus `AdminLayout` dengan React Error Boundary.
+   - Jika ada crash di satu halaman admin, tidak membuat seluruh dashboard putih.
+
+### Fase 4 — Optimasi Ukuran
+
+8. **Lazy-load komponen landing page berat**
+   - `AdminCostCalculator`, `ROICalculator`, `ChatDemo` di-lazy dengan intersection observer sederhana.
+   - Komponen ringan (Hero, Navbar, Footer) tetap eager.
+
+### Fase 5 — Dokumentasi
+
+9. **Perbarui README.md**
+   - Tambah section fitur terbaru: Diagnostik 2 Arah, Health Check, Reconnect Wizard, Ops Logs.
+   - Perbarui tabel fitur (status semua fitur baru jadi "Ready").
+   - Tambah section "Changelog" ringkas.
+   - Update versi arsitektur.
+
+10. **Perbarui PROJECT_NORTH_STAR.md**
+    - Tambah pattern lazy loading sebagai standar.
+    - Tambah aturan React Query default config.
+
+---
+
+## File yang Terdampak
+
+| File | Perubahan |
+|------|-----------|
+| `src/App.tsx` | Lazy import semua halaman |
+| `src/pages/admin/DeviceManager.tsx` | Migrasi ke React Query, ganti callManageInstance |
+| `src/hooks/useAdminData.ts` | Tambah hooks untuk DeviceManager |
+| `src/components/admin/InstanceCard.tsx` | Fix dependency array |
+| `src/components/admin/AdminLayout.tsx` | Tambah Error Boundary |
+| `src/pages/Index.tsx` | Lazy-load section berat |
+| `README.md` | Update dokumentasi fitur terbaru |
+
+---
+
+## Kriteria Sukses
+
+- Halaman pertama (landing) memuat lebih cepat karena admin pages tidak ikut di-bundle.
+- Navigasi antar halaman admin tetap instan berkat React Query cache.
+- Tidak ada "fetch ulang dari nol" saat kembali ke DeviceManager.
+- Error di satu halaman tidak crash seluruh dashboard.
+- README mencerminkan kondisi sistem yang sebenarnya.
+
