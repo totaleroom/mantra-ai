@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,21 +13,13 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Loader2, Plus, RefreshCw, Server, Trash2, Activity, CheckCircle2, XCircle, AlertTriangle, Stethoscope, Wifi, WifiOff, Clock } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useQueryClient } from "@tanstack/react-query";
+import { useClientsList, useDeviceSessions } from "@/hooks/useAdminData";
 import InstanceCard from "@/components/admin/InstanceCard";
 
-interface Client { id: string; name: string; }
-interface WaSession {
-  id: string;
-  client_id: string;
-  status: string;
-  qr_code: string | null;
-  instance_name: string | null;
-  last_error?: string | null;
-  last_webhook_event_at?: string | null;
-}
 interface VpsInstance { name: string; status: string; }
 interface TestAllResult {
   overall_status: string;
@@ -43,10 +35,7 @@ interface DiagnosticsResult {
 }
 
 export default function DeviceManager() {
-  const [clients, setClients] = useState<Client[]>([]);
-  const [selectedClientId, setSelectedClientId] = useState<string>("");
-  const [sessions, setSessions] = useState<WaSession[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [selectedClientId, setSelectedClientId] = useState("");
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [instanceName, setInstanceName] = useState("");
@@ -58,61 +47,36 @@ export default function DeviceManager() {
   const [diagnostics, setDiagnostics] = useState<DiagnosticsResult | null>(null);
   const [diagLoading, setDiagLoading] = useState(false);
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
-  useEffect(() => {
-    supabase.from("clients" as any).select("id, name").order("name").then(({ data }) => {
-      setClients((data as any[] || []) as Client[]);
-    });
-  }, []);
+  // React Query hooks
+  const { data: clients = [] } = useClientsList();
+  const { data: sessions = [], isLoading: loading } = useDeviceSessions(selectedClientId);
 
-  useEffect(() => {
-    if (!selectedClientId) { setSessions([]); return; }
-
-    setLoading(true);
-    supabase
-      .from("wa_sessions" as any)
-      .select("*")
-      .eq("client_id", selectedClientId)
-      .then(({ data }) => {
-        setSessions((data as any[] || []) as WaSession[]);
-        setLoading(false);
-      });
-
-    const channel = supabase
-      .channel(`wa_sessions_${selectedClientId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "wa_sessions",
-          filter: `client_id=eq.${selectedClientId}`,
-        },
-        (payload) => {
-          if (payload.eventType === "DELETE") {
-            setSessions(prev => prev.filter(s => s.id !== (payload.old as any).id));
-          } else if (payload.eventType === "INSERT") {
-            setSessions(prev => [...prev, payload.new as WaSession]);
-          } else {
-            setSessions(prev => prev.map(s => s.id === (payload.new as any).id ? payload.new as WaSession : s));
-          }
-        }
-      )
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
-  }, [selectedClientId]);
-
-  const callManageInstance = async (action: string, body: Record<string, any>, method = "POST") => {
-    const { data: { session: authSession } } = await supabase.auth.getSession();
-    if (!authSession?.access_token) {
-      toast({ variant: "destructive", title: "Error", description: "Not authenticated" });
-      return null;
+  const invokeManage = useCallback(async (action: string, body: Record<string, any>, method = "POST") => {
+    const fnName = "manage-wa-instance";
+    const opts: any = { method, body: { ...body, action } };
+    if (method === "DELETE") {
+      opts.body = body;
+    } else {
+      opts.body = { ...body };
     }
 
-    const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
-    const baseUrl = `https://${projectId}.supabase.co/functions/v1/manage-wa-instance`;
-    const url = action ? `${baseUrl}?action=${action}` : baseUrl;
+    const { data, error } = await supabase.functions.invoke(fnName, {
+      body: { ...body },
+      method: method as any,
+      headers: action ? { "x-action": action } : undefined,
+    });
+
+    // The edge function uses query params for action, so we need to use fetch with query params
+    // supabase.functions.invoke doesn't support query params, so we use a thin wrapper
+    const { data: { session: authSession } } = await supabase.auth.getSession();
+    if (!authSession?.access_token) {
+      throw new Error("Not authenticated");
+    }
+
+    const projectUrl = import.meta.env.VITE_SUPABASE_URL;
+    const url = `${projectUrl}/functions/v1/${fnName}${action ? `?action=${action}` : ""}`;
 
     const res = await fetch(url, {
       method,
@@ -123,15 +87,21 @@ export default function DeviceManager() {
       body: JSON.stringify(body),
     });
 
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-    return data;
-  };
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || `HTTP ${res.status}`);
+    return result;
+  }, []);
+
+  const invalidateSessions = useCallback(() => {
+    if (selectedClientId) {
+      queryClient.invalidateQueries({ queryKey: ["deviceSessions", selectedClientId] });
+    }
+  }, [selectedClientId, queryClient]);
 
   const handleTestAll = async () => {
     setTestAllLoading(true);
     try {
-      const result = await callManageInstance("test-all", {});
+      const result = await invokeManage("test-all", {});
       setTestAllResult(result);
       if (result.overall_status === "error") {
         toast({ variant: "destructive", title: "Ada masalah terdeteksi", description: "Lihat detail di panel diagnostik." });
@@ -150,7 +120,7 @@ export default function DeviceManager() {
   const handleDiagnostics = async () => {
     setDiagLoading(true);
     try {
-      const result = await callManageInstance("diagnostics", {});
+      const result = await invokeManage("diagnostics", {});
       setDiagnostics(result);
     } catch (e: any) {
       toast({ variant: "destructive", title: "Diagnostik gagal", description: e.message });
@@ -163,13 +133,11 @@ export default function DeviceManager() {
     if (!selectedClientId || !instanceName.trim()) return;
     setActionLoading("create");
     try {
-      await callManageInstance("create", {
-        client_id: selectedClientId,
-        instance_name: instanceName.trim(),
-      });
+      await invokeManage("create", { client_id: selectedClientId, instance_name: instanceName.trim() });
       toast({ title: "Instance dibuat!", description: "Scan QR code yang muncul." });
       setCreateOpen(false);
       setInstanceName("");
+      invalidateSessions();
     } catch (e: any) {
       toast({ variant: "destructive", title: "Gagal buat instance", description: e.message });
     } finally {
@@ -181,11 +149,12 @@ export default function DeviceManager() {
     if (!selectedClientId) return;
     setActionLoading("sync");
     try {
-      const result = await callManageInstance("sync", { client_id: selectedClientId });
+      const result = await invokeManage("sync", { client_id: selectedClientId });
       toast({
         title: "Sync selesai!",
         description: `${result.synced?.length || 0} instance baru di-import, ${result.existing?.length || 0} sudah ada.`,
       });
+      invalidateSessions();
     } catch (e: any) {
       toast({ variant: "destructive", title: "Gagal sync", description: e.message });
     } finally {
@@ -196,7 +165,7 @@ export default function DeviceManager() {
   const handleFetchVps = async () => {
     setActionLoading("vps-list");
     try {
-      const result = await callManageInstance("list", {});
+      const result = await invokeManage("list", {});
       setVpsInstances(result.instances || []);
       setVpsOpen(true);
     } catch (e: any) {
@@ -210,9 +179,9 @@ export default function DeviceManager() {
     setActionLoading("delete-all");
     setDeleteAllOpen(false);
     try {
-      await callManageInstance("delete-all", { client_id: selectedClientId || undefined });
+      await invokeManage("delete-all", { client_id: selectedClientId || undefined });
       toast({ title: "Semua instance dihapus", description: "Anda bisa mulai dari awal." });
-      setSessions([]);
+      invalidateSessions();
     } catch (e: any) {
       toast({ variant: "destructive", title: "Gagal hapus semua", description: e.message });
     } finally {
@@ -220,22 +189,22 @@ export default function DeviceManager() {
     }
   };
 
-  const handleInstanceAction = async (action: string, instanceNameVal: string) => {
+  const handleInstanceAction = useCallback(async (action: string, instanceNameVal: string) => {
     const loadingKey = `${action}_${instanceNameVal}`;
     setActionLoading(loadingKey);
     try {
       if (action === "delete") {
-        await callManageInstance("", { instance_name: instanceNameVal }, "DELETE");
+        await invokeManage("", { instance_name: instanceNameVal }, "DELETE");
         toast({ title: "Instance dihapus" });
       } else if (action === "set-webhook") {
-        const result = await callManageInstance("set-webhook", { instance_name: instanceNameVal });
+        const result = await invokeManage("set-webhook", { instance_name: instanceNameVal });
         if (result.ok) {
           toast({ title: "Webhook berhasil diperbaiki", description: `Format: ${result.format}` });
         } else {
           toast({ variant: "destructive", title: "Webhook gagal diperbaiki", description: result.error || "Unknown error" });
         }
       } else {
-        await callManageInstance(action, { instance_name: instanceNameVal });
+        await invokeManage(action, { instance_name: instanceNameVal });
         const messages: Record<string, string> = {
           connect: "QR code diperbarui",
           restart: "Session di-restart, menunggu QR baru...",
@@ -243,12 +212,13 @@ export default function DeviceManager() {
         };
         toast({ title: messages[action] || "Berhasil" });
       }
+      invalidateSessions();
     } catch (e: any) {
       toast({ variant: "destructive", title: "Error", description: e.message });
     } finally {
       setActionLoading(null);
     }
-  };
+  }, [invokeManage, invalidateSessions, toast]);
 
   const getStatusIcon = (status: string) => {
     if (status === "ok") return <CheckCircle2 className="h-4 w-4 text-green-600" />;
@@ -289,7 +259,6 @@ export default function DeviceManager() {
 
         {testAllResult ? (
           <div className="space-y-3">
-            {/* KPI Summary */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <Card className="bg-green-500/5 border-green-500/20">
                 <CardContent className="p-3 flex items-center gap-2">
@@ -329,7 +298,6 @@ export default function DeviceManager() {
               </Card>
             </div>
 
-            {/* Steps */}
             <div className="space-y-1">
               {testAllResult.steps.map((step, i) => (
                 <div key={i} className="flex items-center gap-2 text-sm rounded-md px-3 py-1.5 bg-muted/30">
@@ -535,7 +503,7 @@ export default function DeviceManager() {
       {selectedClientId && !loading && (
         <div className="space-y-4">
           {sessions.length > 0 ? (
-            sessions.map((session) => (
+            sessions.map((session: any) => (
               <InstanceCard
                 key={session.id}
                 session={session}
