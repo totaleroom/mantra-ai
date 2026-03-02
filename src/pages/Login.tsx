@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,9 +20,15 @@ const Login = () => {
   const [honeypot, setHoneypot] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [mode, setMode] = useState<"login" | "register">("login");
-  const { signIn, signUp } = useAuth();
+  const { user, isAdmin, signIn, signUp } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (user && isAdmin) {
+      navigate("/admin/clients", { replace: true });
+    }
+  }, [user, isAdmin, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -44,7 +50,6 @@ const Login = () => {
     try {
       if (mode === "login") {
         await signIn(email, password);
-        navigate("/admin/clients");
       } else {
         await signUp(email, password);
         toast({
