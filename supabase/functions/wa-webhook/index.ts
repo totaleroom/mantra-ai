@@ -158,6 +158,7 @@ function normalizeEventName(event: string | undefined): string {
   if (!event) return "";
   const lower = event.toLowerCase().replace(/_/g, ".");
   // Map aliases
+  if (lower === "diagnostic.ping") return "diagnostic.ping";
   if (lower.includes("qrcode") || lower === "qr" || lower === "qr.updated") return "qrcode.updated";
   if (lower.includes("connection")) return "connection.update";
   if (lower.includes("messages.upsert") || lower === "messages_upsert") return "messages.upsert";
@@ -230,6 +231,21 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
+
+    // === Handle DIAGNOSTIC PING (bidirectional test) ===
+    if (event === "diagnostic.ping") {
+      const pingId = body.data?.ping_id || body.ping_id;
+      console.log("Diagnostic ping received:", pingId);
+      await supabaseAdmin.from("wa_ops_logs").insert({
+        instance_name: instanceName || "_diagnostic",
+        action: "diagnostic.ping",
+        status: "ok",
+        metadata: { ping_id: pingId, received_at: new Date().toISOString() },
+      });
+      return new Response(JSON.stringify({ status: "pong", ping_id: pingId }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     // === Update heartbeat for ANY event from this instance ===
     if (instanceName) {
