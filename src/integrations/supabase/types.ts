@@ -333,6 +333,39 @@ export type Database = {
           },
         ]
       }
+      wa_ops_logs: {
+        Row: {
+          action: string
+          created_at: string
+          error_message: string | null
+          id: string
+          instance_name: string | null
+          latency_ms: number | null
+          metadata: Json | null
+          status: string
+        }
+        Insert: {
+          action: string
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          instance_name?: string | null
+          latency_ms?: number | null
+          metadata?: Json | null
+          status?: string
+        }
+        Update: {
+          action?: string
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          instance_name?: string | null
+          latency_ms?: number | null
+          metadata?: Json | null
+          status?: string
+        }
+        Relationships: []
+      }
       wa_sessions: {
         Row: {
           client_id: string
@@ -340,6 +373,7 @@ export type Database = {
           id: string
           instance_name: string | null
           last_error: string | null
+          last_webhook_event_at: string | null
           qr_code: string | null
           status: string
           updated_at: string
@@ -350,6 +384,7 @@ export type Database = {
           id?: string
           instance_name?: string | null
           last_error?: string | null
+          last_webhook_event_at?: string | null
           qr_code?: string | null
           status?: string
           updated_at?: string
@@ -360,6 +395,7 @@ export type Database = {
           id?: string
           instance_name?: string | null
           last_error?: string | null
+          last_webhook_event_at?: string | null
           qr_code?: string | null
           status?: string
           updated_at?: string

@@ -39,9 +39,7 @@ async function setWebhookWithFallback(
     const errA = await resA.text();
     console.warn(`Webhook format A failed for ${instanceName}:`, resA.status, errA);
 
-    // If schema error, try format B
     if (errA.includes("requires property") || resA.status === 400) {
-      // Format B: nested webhook object (Evolution v1)
       const resB = await fetch(`${baseUrl}/webhook/set/${encoded}`, {
         method: "POST",
         headers: { "Content-Type": "application/json", apikey: apiKey },
@@ -73,20 +71,36 @@ async function setWebhookWithFallback(
 /** Extract QR code from various Evolution API response formats */
 function extractQrCode(data: any): string | null {
   if (!data) return null;
-  // Direct fields
   if (data.base64) return data.base64;
   if (data.code) return data.code;
-  // Nested qrcode object
   if (data.qrcode?.base64) return data.qrcode.base64;
   if (data.qrcode?.code) return data.qrcode.code;
-  // Nested pairingCode
+  if (data.qrcode && typeof data.qrcode === "string") return data.qrcode;
   if (data.pairingCode) return data.pairingCode;
   return null;
+}
+
+/** Log an operation to wa_ops_logs */
+async function logOp(supabase: any, instanceName: string | null, action: string, status: string, startTime: number, errorMessage?: string, metadata?: any) {
+  try {
+    await supabase.from("wa_ops_logs").insert({
+      instance_name: instanceName,
+      action,
+      status,
+      latency_ms: Date.now() - startTime,
+      error_message: errorMessage || null,
+      metadata: metadata || {},
+    });
+  } catch (e) {
+    console.warn("Failed to log operation:", e);
+  }
 }
 
 serve(async (req) => {
   if (req.method === "OPTIONS")
     return new Response(null, { headers: corsHeaders });
+
+  const opStart = Date.now();
 
   try {
     // Auth: require admin
@@ -170,10 +184,8 @@ serve(async (req) => {
         console.warn("Evolution delete failed (non-critical):", e);
       }
 
-      await supabaseAdmin
-        .from("wa_sessions")
-        .delete()
-        .eq("instance_name", instance_name);
+      await supabaseAdmin.from("wa_sessions").delete().eq("instance_name", instance_name);
+      await logOp(supabaseAdmin, instance_name, "delete", "ok", opStart);
 
       return new Response(
         JSON.stringify({ success: true }),
@@ -194,17 +206,19 @@ serve(async (req) => {
     if (action === "health-check") {
       const result: any = {
         evolution_reachable: false,
+        latency_ms: 0,
         instances: [],
         webhook_status: {},
         errors: [],
       };
 
-      // 1. Check Evolution API reachability
+      const pingStart = Date.now();
       try {
         const pingRes = await fetch(`${baseUrl}/instance/fetchInstances`, {
           method: "GET",
           headers: { apikey: EVOLUTION_API_KEY },
         });
+        result.latency_ms = Date.now() - pingStart;
         if (pingRes.ok) {
           result.evolution_reachable = true;
           const instances = await pingRes.json();
@@ -217,10 +231,11 @@ serve(async (req) => {
           result.errors.push(`Evolution API returned ${pingRes.status}: ${errText.substring(0, 200)}`);
         }
       } catch (e) {
+        result.latency_ms = Date.now() - pingStart;
         result.errors.push(`Cannot reach Evolution API: ${e instanceof Error ? e.message : String(e)}`);
       }
 
-      // 2. Check webhook config for specific instances
+      // Check webhook config for each instance
       if (result.evolution_reachable && result.instances.length > 0) {
         for (const inst of result.instances) {
           try {
@@ -245,13 +260,241 @@ serve(async (req) => {
         }
       }
 
+      await logOp(supabaseAdmin, null, "health-check", result.evolution_reachable ? "ok" : "error", opStart);
+
       return new Response(
         JSON.stringify({ success: true, ...result }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // --- SET-WEBHOOK: Fix webhook for an instance ---
+    // --- DIAGNOSTICS: comprehensive per-instance diagnosis ---
+    if (action === "diagnostics") {
+      const { webhookUrl } = await getWebhookConfig();
+      
+      const result: any = {
+        evolution_reachable: false,
+        latency_ms: 0,
+        vps_instances: [],
+        db_sessions: [],
+        instance_details: [],
+        summary: { connected: 0, connecting: 0, disconnected: 0, error: 0, total_vps: 0, total_db: 0 },
+        recommendations: [],
+      };
+
+      // 1. Ping Evolution
+      const pingStart = Date.now();
+      let vpsInstances: any[] = [];
+      try {
+        const pingRes = await fetch(`${baseUrl}/instance/fetchInstances`, {
+          method: "GET",
+          headers: { apikey: EVOLUTION_API_KEY },
+        });
+        result.latency_ms = Date.now() - pingStart;
+        if (pingRes.ok) {
+          result.evolution_reachable = true;
+          vpsInstances = await pingRes.json() || [];
+        } else {
+          await pingRes.text();
+          result.recommendations.push("Evolution API tidak bisa diakses. Periksa service di VPS.");
+        }
+      } catch (e) {
+        result.latency_ms = Date.now() - pingStart;
+        result.recommendations.push(`Evolution API error: ${e instanceof Error ? e.message : String(e)}`);
+      }
+
+      result.vps_instances = vpsInstances.map((i: any) => ({
+        name: i.name || i.instanceName,
+        status: i.connectionStatus,
+      }));
+      result.summary.total_vps = vpsInstances.length;
+
+      // 2. Get DB sessions
+      const { data: dbSessions } = await supabaseAdmin
+        .from("wa_sessions")
+        .select("id, client_id, instance_name, status, qr_code, last_error, last_webhook_event_at, updated_at");
+      result.db_sessions = dbSessions || [];
+      result.summary.total_db = (dbSessions || []).length;
+
+      // 3. Build per-instance details
+      const allNames = new Set<string>();
+      for (const v of vpsInstances) allNames.add(v.name || v.instanceName);
+      for (const d of dbSessions || []) if (d.instance_name) allNames.add(d.instance_name);
+
+      for (const name of allNames) {
+        const vps = vpsInstances.find((i: any) => (i.name || i.instanceName) === name);
+        const db = (dbSessions || []).find((d: any) => d.instance_name === name);
+        
+        const detail: any = {
+          instance_name: name,
+          in_vps: !!vps,
+          in_db: !!db,
+          vps_status: vps?.connectionStatus || null,
+          db_status: db?.status || null,
+          has_qr: !!db?.qr_code,
+          last_error: db?.last_error || null,
+          last_webhook_event_at: db?.last_webhook_event_at || null,
+          webhook: null,
+          recommendations: [],
+        };
+
+        // Count statuses
+        const status = db?.status || (vps?.connectionStatus === "open" ? "connected" : "disconnected");
+        if (status === "connected") result.summary.connected++;
+        else if (status === "connecting") result.summary.connecting++;
+        else if (status === "error") result.summary.error++;
+        else result.summary.disconnected++;
+
+        // Check webhook
+        if (result.evolution_reachable && vps) {
+          try {
+            const whRes = await fetch(`${baseUrl}/webhook/find/${encodeURIComponent(name)}`, {
+              method: "GET",
+              headers: { apikey: EVOLUTION_API_KEY },
+            });
+            if (whRes.ok) {
+              const whData = await whRes.json();
+              const whUrl = whData?.url || whData?.webhook?.url;
+              const whEnabled = whData?.enabled ?? whData?.webhook?.enabled ?? false;
+              detail.webhook = { configured: !!whUrl, url: whUrl, enabled: whEnabled };
+              
+              if (!whUrl || !whEnabled) {
+                detail.recommendations.push("Webhook belum aktif. Klik 'Perbaiki Webhook'.");
+              } else if (whUrl !== webhookUrl) {
+                detail.recommendations.push("Webhook URL tidak sesuai. Klik 'Perbaiki Webhook'.");
+              }
+            } else {
+              await whRes.text();
+              detail.webhook = { configured: false };
+              detail.recommendations.push("Webhook belum terpasang.");
+            }
+          } catch {
+            detail.webhook = { configured: false, error: "check failed" };
+          }
+        }
+
+        // Heartbeat check
+        if (db?.last_webhook_event_at) {
+          const age = Date.now() - new Date(db.last_webhook_event_at).getTime();
+          if (age > 5 * 60 * 1000) {
+            detail.recommendations.push("Tidak ada event webhook > 5 menit. Periksa koneksi.");
+          }
+        } else if (db) {
+          detail.recommendations.push("Belum pernah menerima event webhook.");
+        }
+
+        // Status-specific recommendations
+        if (!vps && db) {
+          detail.recommendations.push("Instance ada di database tapi tidak di VPS. Buat ulang atau hapus.");
+        }
+        if (vps && !db) {
+          detail.recommendations.push("Instance ada di VPS tapi tidak di database. Gunakan Sync.");
+        }
+        if (db?.status === "connecting" && !db?.qr_code) {
+          detail.recommendations.push("Status connecting tapi QR kosong. Restart lalu Fetch QR.");
+        }
+
+        result.instance_details.push(detail);
+      }
+
+      // Global recommendations
+      if (!result.evolution_reachable) {
+        result.recommendations.push("KRITIS: Evolution API tidak bisa diakses.");
+      }
+      if (result.summary.total_vps === 0 && result.evolution_reachable) {
+        result.recommendations.push("Tidak ada instance di VPS. Buat instance baru.");
+      }
+
+      await logOp(supabaseAdmin, null, "diagnostics", "ok", opStart, undefined, { summary: result.summary });
+
+      return new Response(
+        JSON.stringify({ success: true, ...result }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // --- TEST-ALL: one-click comprehensive test ---
+    if (action === "test-all") {
+      const steps: any[] = [];
+      let overallStatus = "ok";
+
+      // Step 1: Evolution reachable
+      const step1Start = Date.now();
+      try {
+        const res = await fetch(`${baseUrl}/instance/fetchInstances`, {
+          method: "GET",
+          headers: { apikey: EVOLUTION_API_KEY },
+        });
+        const latency = Date.now() - step1Start;
+        if (res.ok) {
+          const instances = await res.json();
+          steps.push({ name: "Evolution API", status: "ok", latency_ms: latency, detail: `${instances.length} instance ditemukan` });
+        } else {
+          await res.text();
+          steps.push({ name: "Evolution API", status: "error", latency_ms: latency, detail: `HTTP ${res.status}` });
+          overallStatus = "error";
+        }
+      } catch (e) {
+        steps.push({ name: "Evolution API", status: "error", latency_ms: Date.now() - step1Start, detail: String(e) });
+        overallStatus = "error";
+      }
+
+      // Step 2: DB sessions check
+      const { data: sessions } = await supabaseAdmin.from("wa_sessions").select("instance_name, status, last_webhook_event_at, last_error");
+      const connected = (sessions || []).filter(s => s.status === "connected").length;
+      const disconnected = (sessions || []).filter(s => s.status === "disconnected").length;
+      const connecting = (sessions || []).filter(s => s.status === "connecting").length;
+      const errCount = (sessions || []).filter(s => s.status === "error").length;
+      steps.push({
+        name: "Database Sessions",
+        status: connected > 0 ? "ok" : disconnected > 0 ? "warn" : "ok",
+        detail: `${connected} connected, ${connecting} connecting, ${disconnected} disconnected, ${errCount} error`,
+      });
+      if (disconnected > 0 || errCount > 0) overallStatus = overallStatus === "error" ? "error" : "warn";
+
+      // Step 3: Webhook heartbeat
+      const now = Date.now();
+      const staleInstances: string[] = [];
+      for (const s of sessions || []) {
+        if (s.last_webhook_event_at) {
+          const age = now - new Date(s.last_webhook_event_at).getTime();
+          if (age > 5 * 60 * 1000) staleInstances.push(s.instance_name || "?");
+        } else {
+          staleInstances.push(s.instance_name || "?");
+        }
+      }
+      steps.push({
+        name: "Webhook Heartbeat",
+        status: staleInstances.length === 0 ? "ok" : "warn",
+        detail: staleInstances.length === 0 
+          ? "Semua instance aktif menerima event" 
+          : `${staleInstances.length} instance tidak ada event terbaru: ${staleInstances.join(", ")}`,
+      });
+
+      // Step 4: Recent ops logs
+      const { data: recentLogs } = await supabaseAdmin
+        .from("wa_ops_logs")
+        .select("action, status, error_message, created_at")
+        .order("created_at", { ascending: false })
+        .limit(5);
+      const recentErrors = (recentLogs || []).filter(l => l.status === "error" || l.error_message);
+      steps.push({
+        name: "Recent Operations",
+        status: recentErrors.length === 0 ? "ok" : "warn",
+        detail: recentErrors.length === 0 
+          ? "Tidak ada error terbaru" 
+          : `${recentErrors.length} error terbaru ditemukan`,
+      });
+
+      await logOp(supabaseAdmin, null, "test-all", overallStatus, opStart);
+
+      return new Response(
+        JSON.stringify({ success: true, overall_status: overallStatus, steps, sessions_summary: { connected, connecting, disconnected, error: errCount } }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // --- SET-WEBHOOK ---
     if (action === "set-webhook") {
       const { instance_name } = body;
       if (!instance_name) throw new Error("instance_name required");
@@ -262,11 +505,10 @@ serve(async (req) => {
       if (!whResult.ok) {
         await updateSessionError(instance_name, `Webhook setup failed: ${whResult.error}`);
       } else {
-        await supabaseAdmin
-          .from("wa_sessions")
-          .update({ last_error: null })
-          .eq("instance_name", instance_name);
+        await supabaseAdmin.from("wa_sessions").update({ last_error: null }).eq("instance_name", instance_name);
       }
+
+      await logOp(supabaseAdmin, instance_name, "set-webhook", whResult.ok ? "ok" : "error", opStart, whResult.error);
 
       return new Response(
         JSON.stringify({ success: whResult.ok, ...whResult }),
@@ -281,7 +523,6 @@ serve(async (req) => {
 
       const { webhookUrl, webhookSecret } = await getWebhookConfig();
 
-      // Create instance - try with webhook in create payload
       let createData: any;
       const createPayload = {
         instanceName: instance_name,
@@ -306,7 +547,6 @@ serve(async (req) => {
         const errText = await createRes.text();
         console.error("Evolution create error:", createRes.status, errText);
 
-        // If webhook format issue, try without webhook and set separately
         if (errText.includes("requires property") || createRes.status === 400) {
           const createRes2 = await fetch(`${baseUrl}/instance/create`, {
             method: "POST",
@@ -319,14 +559,15 @@ serve(async (req) => {
           });
           if (!createRes2.ok) {
             const errText2 = await createRes2.text();
+            await logOp(supabaseAdmin, instance_name, "create", "error", opStart, errText2);
             throw new Error(`Failed to create instance: ${createRes2.status} - ${errText2}`);
           }
           createData = await createRes2.json();
 
-          // Set webhook separately with fallback
           const whResult = await setWebhookWithFallback(baseUrl, EVOLUTION_API_KEY, instance_name, webhookUrl, webhookSecret);
           console.log(`Webhook set result for ${instance_name}:`, whResult);
         } else {
+          await logOp(supabaseAdmin, instance_name, "create", "error", opStart, errText);
           throw new Error(`Failed to create instance: ${createRes.status} - ${errText}`);
         }
       } else {
@@ -350,6 +591,8 @@ serve(async (req) => {
         throw new Error("Failed to insert session: " + insertErr.message);
       }
 
+      await logOp(supabaseAdmin, instance_name, "create", "ok", opStart, undefined, { has_qr: !!qrCode });
+
       return new Response(
         JSON.stringify({ success: true, qr_code: qrCode, instance: createData }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -368,12 +611,13 @@ serve(async (req) => {
 
       if (!connectRes.ok) {
         const errText = await connectRes.text();
-        // Provide actionable error messages
         if (connectRes.status === 404) {
           await updateSessionError(instance_name, "Instance tidak ditemukan di VPS. Coba Sync atau buat ulang.");
+          await logOp(supabaseAdmin, instance_name, "connect", "error", opStart, "not_found");
           throw new Error("Instance tidak ditemukan di Evolution API. Mungkin sudah dihapus dari VPS.");
         }
         await updateSessionError(instance_name, `Connect gagal: HTTP ${connectRes.status}`);
+        await logOp(supabaseAdmin, instance_name, "connect", "error", opStart, errText);
         throw new Error(`Connect failed: ${connectRes.status} - ${errText}`);
       }
 
@@ -385,8 +629,9 @@ serve(async (req) => {
           .from("wa_sessions")
           .update({ qr_code: qrCode, status: "connecting", last_error: null })
           .eq("instance_name", instance_name);
+        await logOp(supabaseAdmin, instance_name, "connect", "ok", opStart, undefined, { has_qr: true });
       } else {
-        // Check connection state - maybe already connected
+        // Check connection state
         try {
           const stateRes = await fetch(`${baseUrl}/instance/connectionState/${encodeURIComponent(instance_name)}`, {
             method: "GET",
@@ -400,6 +645,7 @@ serve(async (req) => {
                 .from("wa_sessions")
                 .update({ status: "connected", qr_code: null, last_error: null })
                 .eq("instance_name", instance_name);
+              await logOp(supabaseAdmin, instance_name, "connect", "ok", opStart, undefined, { already_connected: true });
               return new Response(
                 JSON.stringify({ success: true, qr_code: null, already_connected: true }),
                 { headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -416,6 +662,7 @@ serve(async (req) => {
           .from("wa_sessions")
           .update({ status: "connecting", last_error: "QR belum tersedia. Coba restart instance lalu fetch QR ulang." })
           .eq("instance_name", instance_name);
+        await logOp(supabaseAdmin, instance_name, "connect", "warn", opStart, "no_qr");
       }
 
       return new Response(
@@ -439,6 +686,7 @@ serve(async (req) => {
         console.warn("Restart warning:", restartRes.status, errText);
         if (restartRes.status === 404) {
           await updateSessionError(instance_name, "Instance tidak ditemukan di VPS.");
+          await logOp(supabaseAdmin, instance_name, "restart", "error", opStart, "not_found");
           throw new Error("Instance tidak ditemukan di VPS. Coba Sync atau buat ulang.");
         }
       } else {
@@ -449,6 +697,8 @@ serve(async (req) => {
         .from("wa_sessions")
         .update({ status: "connecting", qr_code: null, last_error: null })
         .eq("instance_name", instance_name);
+
+      await logOp(supabaseAdmin, instance_name, "restart", "ok", opStart);
 
       return new Response(
         JSON.stringify({ success: true }),
@@ -479,6 +729,8 @@ serve(async (req) => {
         .update({ status: "disconnected", qr_code: null, last_error: null })
         .eq("instance_name", instance_name);
 
+      await logOp(supabaseAdmin, instance_name, "logout", "ok", opStart);
+
       return new Response(
         JSON.stringify({ success: true }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -496,6 +748,7 @@ serve(async (req) => {
       });
       if (!fetchRes.ok) {
         const errText = await fetchRes.text();
+        await logOp(supabaseAdmin, null, "sync", "error", opStart, errText);
         throw new Error(`Gagal mengambil daftar instance dari VPS: ${fetchRes.status}`);
       }
       const instances = await fetchRes.json();
@@ -527,12 +780,13 @@ serve(async (req) => {
           synced.push(name);
         }
 
-        // Set webhook with fallback
         const whResult = await setWebhookWithFallback(baseUrl, EVOLUTION_API_KEY, name, webhookUrl, webhookSecret);
         if (!whResult.ok) {
           console.warn(`Webhook setup failed for ${name}:`, whResult.error);
         }
       }
+
+      await logOp(supabaseAdmin, null, "sync", "ok", opStart, undefined, { synced: synced.length, existing: existing.length });
 
       return new Response(
         JSON.stringify({ success: true, synced, existing, total: instances.length }),
@@ -597,6 +851,8 @@ serve(async (req) => {
       } else {
         await supabaseAdmin.from("wa_sessions").delete().neq("id", "00000000-0000-0000-0000-000000000000");
       }
+
+      await logOp(supabaseAdmin, null, "delete-all", "ok", opStart);
 
       return new Response(
         JSON.stringify({ success: true }),

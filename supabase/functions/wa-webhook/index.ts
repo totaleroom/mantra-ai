@@ -7,9 +7,6 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-/**
- * Detect sector/role_tag from message keywords for targeted RAG search.
- */
 function detectSector(message: string): string | null {
   const lower = message.toLowerCase();
 
@@ -38,10 +35,6 @@ function detectSector(message: string): string | null {
   return null;
 }
 
-/**
- * Build chat messages from history for context memory.
- * Converts wa_messages rows to OpenAI-compatible message format.
- */
 function buildChatMessages(history: { sender: string; content: string; media_url?: string | null }[]): any[] {
   return history.map((msg) => {
     if (msg.sender === "USER") {
@@ -66,10 +59,6 @@ function buildChatMessages(history: { sender: string; content: string; media_url
   });
 }
 
-/**
- * Trim chat history by character limit to prevent context length exceeded errors.
- * Removes oldest messages first, always keeps the last message.
- */
 function trimHistoryByCharLimit(messages: any[], maxChars: number = 3000): any[] {
   if (messages.length === 0) return messages;
 
@@ -99,9 +88,6 @@ function trimHistoryByCharLimit(messages: any[], maxChars: number = 3000): any[]
   return trimmed;
 }
 
-/**
- * Download media from Evolution API and return base64 string.
- */
 async function downloadMediaBase64(messageData: any, instanceName: string): Promise<string | null> {
   try {
     const EVOLUTION_API_URL = Deno.env.get("EVOLUTION_API_URL")!;
@@ -127,9 +113,6 @@ async function downloadMediaBase64(messageData: any, instanceName: string): Prom
   }
 }
 
-/**
- * Upload base64 image to Supabase Storage and return signed URL.
- */
 async function uploadMediaToStorage(
   supabase: any,
   base64: string,
@@ -141,7 +124,6 @@ async function uploadMediaToStorage(
     const contentType = mediaType === "video" ? "video/mp4" : "image/jpeg";
     const path = `media/${conversationId}/${Date.now()}.${ext}`;
 
-    // Decode base64 to Uint8Array
     const binaryString = atob(base64);
     const bytes = new Uint8Array(binaryString.length);
     for (let i = 0; i < binaryString.length; i++) {
@@ -157,7 +139,6 @@ async function uploadMediaToStorage(
       return null;
     }
 
-    // Create signed URL (valid for 1 year)
     const { data: signedData } = await supabase.storage
       .from("knowledge")
       .createSignedUrl(path, 60 * 60 * 24 * 365);
@@ -167,6 +148,53 @@ async function uploadMediaToStorage(
     console.error("Storage upload failed:", e);
     return null;
   }
+}
+
+/**
+ * Normalize event name to handle Evolution API variations.
+ * Supports: qrcode.updated, QRCODE_UPDATED, qr, qr.updated, etc.
+ */
+function normalizeEventName(event: string | undefined): string {
+  if (!event) return "";
+  const lower = event.toLowerCase().replace(/_/g, ".");
+  // Map aliases
+  if (lower.includes("qrcode") || lower === "qr" || lower === "qr.updated") return "qrcode.updated";
+  if (lower.includes("connection")) return "connection.update";
+  if (lower.includes("messages.upsert") || lower === "messages_upsert") return "messages.upsert";
+  return lower;
+}
+
+/**
+ * Extract QR code from various webhook payload formats.
+ */
+function extractQrFromWebhook(body: any): string | null {
+  const data = body.data || body;
+  // Direct fields
+  if (typeof data === "string" && data.length > 20) return data;
+  if (data?.base64) return data.base64;
+  if (data?.code) return data.code;
+  if (data?.qrcode?.base64) return data.qrcode.base64;
+  if (data?.qrcode?.code) return data.qrcode.code;
+  if (data?.qrcode && typeof data.qrcode === "string") return data.qrcode;
+  if (data?.pairingCode) return data.pairingCode;
+  // body-level fallbacks
+  if (body.qrcode?.base64) return body.qrcode.base64;
+  if (body.qrcode?.code) return body.qrcode.code;
+  if (body.base64) return body.base64;
+  if (body.code && typeof body.code === "string" && body.code.length > 10) return body.code;
+  return null;
+}
+
+/**
+ * Map Evolution connection state to our status enum.
+ */
+function mapConnectionState(state: string | undefined): "connected" | "connecting" | "disconnected" | "error" {
+  if (!state) return "disconnected";
+  const lower = state.toLowerCase();
+  if (lower === "open" || lower === "connected") return "connected";
+  if (lower === "connecting" || lower === "qr" || lower === "pairingcode") return "connecting";
+  if (lower === "close" || lower === "disconnected") return "disconnected";
+  return "error";
 }
 
 serve(async (req) => {
@@ -194,7 +222,8 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    const event = body.event || body.type;
+    const rawEvent = body.event || body.type;
+    const event = normalizeEventName(rawEvent);
     const instanceName = body.instance || body.instanceName;
 
     const supabaseAdmin = createClient(
@@ -202,18 +231,43 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
+    // === Update heartbeat for ANY event from this instance ===
+    if (instanceName) {
+      await supabaseAdmin
+        .from("wa_sessions")
+        .update({ last_webhook_event_at: new Date().toISOString() })
+        .eq("instance_name", instanceName);
+    }
+
     // === Handle CONNECTION_UPDATE ===
     if (event === "connection.update") {
-      const state = body.data?.state || body.data?.status;
+      const state = body.data?.state || body.data?.status || body.data?.action;
       console.log("Connection update:", instanceName, state);
 
       if (instanceName && state) {
-        const dbStatus = state === "open" ? "connected" : "disconnected";
+        const dbStatus = mapConnectionState(state);
+        const updatePayload: any = { status: dbStatus };
+        
+        if (dbStatus === "connected") {
+          updatePayload.qr_code = null;
+          updatePayload.last_error = null;
+        } else if (dbStatus === "error") {
+          updatePayload.last_error = `Connection state: ${state}`;
+        }
+
         await supabaseAdmin
           .from("wa_sessions")
-          .update({ status: dbStatus, qr_code: dbStatus === "connected" ? null : undefined })
+          .update(updatePayload)
           .eq("instance_name", instanceName);
       }
+
+      // Log to ops
+      await supabaseAdmin.from("wa_ops_logs").insert({
+        instance_name: instanceName,
+        action: "connection.update",
+        status: state || "unknown",
+        metadata: { raw_event: rawEvent, state },
+      });
 
       return new Response(JSON.stringify({ status: "connection_updated", state }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -222,24 +276,50 @@ serve(async (req) => {
 
     // === Handle QRCODE_UPDATED ===
     if (event === "qrcode.updated") {
-      const qrCode = body.data?.qrcode?.base64 || body.data?.qrcode?.code || body.data?.qrcode || null;
-      console.log("QR code updated for:", instanceName);
+      const qrCode = extractQrFromWebhook(body);
+      console.log("QR code event for:", instanceName, "has_qr:", !!qrCode);
 
-      if (instanceName && qrCode) {
-        await supabaseAdmin
-          .from("wa_sessions")
-          .update({ qr_code: typeof qrCode === "string" ? qrCode : JSON.stringify(qrCode), status: "connecting" })
-          .eq("instance_name", instanceName);
+      if (instanceName) {
+        if (qrCode) {
+          await supabaseAdmin
+            .from("wa_sessions")
+            .update({ 
+              qr_code: typeof qrCode === "string" ? qrCode : JSON.stringify(qrCode), 
+              status: "connecting",
+              last_error: null,
+            })
+            .eq("instance_name", instanceName);
+        } else {
+          console.warn("QR event received but no QR data found. Payload keys:", Object.keys(body.data || body));
+          // Log the empty QR event for debugging
+          await supabaseAdmin.from("wa_ops_logs").insert({
+            instance_name: instanceName,
+            action: "qrcode.updated",
+            status: "empty_qr",
+            error_message: "QR event received but no QR data extracted",
+            metadata: { payload_keys: Object.keys(body.data || {}), raw_event: rawEvent },
+          });
+        }
       }
 
-      return new Response(JSON.stringify({ status: "qr_updated" }), {
+      return new Response(JSON.stringify({ status: "qr_updated", has_qr: !!qrCode }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     // === Only process messages.upsert from here ===
     if (event !== "messages.upsert") {
-      return new Response(JSON.stringify({ status: "ignored", event }), {
+      // Log unknown events for debugging
+      if (rawEvent) {
+        console.log("Unhandled event:", rawEvent, "normalized:", event, "instance:", instanceName);
+        await supabaseAdmin.from("wa_ops_logs").insert({
+          instance_name: instanceName,
+          action: "unhandled_event",
+          status: "ignored",
+          metadata: { raw_event: rawEvent, normalized: event },
+        });
+      }
+      return new Response(JSON.stringify({ status: "ignored", event: rawEvent }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -267,32 +347,23 @@ serve(async (req) => {
       });
     }
 
-    // Extract text message
     const messageText = messageData.message?.conversation || 
       messageData.message?.extendedTextMessage?.text || "";
     
-    // Detect image message
     const imageMsg = messageData.message?.imageMessage;
     const hasImage = !!imageMsg;
     const imageCaption = imageMsg?.caption || "";
 
-    // Skip only if NO text AND NO image
     if (!messageText.trim() && !hasImage) {
       return new Response(JSON.stringify({ status: "no_text" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Effective text for RAG search (use caption if image, otherwise messageText)
     const effectiveText = messageText.trim() || imageCaption.trim();
-
     const pushName = messageData.pushName || "";
 
-    // supabaseAdmin already created above for connection/qrcode events
-    // Re-use it here (it was created in the connection.update block but we need it here too)
-    // Actually, supabaseAdmin was created above line 200, so we need to remove duplicate
-
-    // 1. Find client_id from wa_sessions (lookup by instance_name first, then fallback)
+    // 1. Find client_id from wa_sessions
     const { data: sessionData } = await supabaseAdmin
       .from("wa_sessions")
       .select("client_id")
@@ -301,7 +372,6 @@ serve(async (req) => {
 
     let clientId = sessionData?.client_id;
     if (!clientId) {
-      // Fallback: try by id (legacy)
       const { data: sessionById } = await supabaseAdmin
         .from("wa_sessions")
         .select("client_id")
@@ -310,7 +380,6 @@ serve(async (req) => {
       clientId = sessionById?.client_id;
     }
     if (!clientId) {
-      // Last fallback: any connected session
       const { data: anySession } = await supabaseAdmin
         .from("wa_sessions")
         .select("client_id")
@@ -403,7 +472,7 @@ serve(async (req) => {
       conversation = newConvo;
     }
 
-    // 5. Handle media: download and upload to storage
+    // 5. Handle media
     let mediaUrl: string | null = null;
     let mediaType: string | null = null;
 
@@ -415,7 +484,7 @@ serve(async (req) => {
       }
     }
 
-    // 6. Save incoming USER message (with media if available)
+    // 6. Save incoming USER message
     const messageContent = effectiveText || (hasImage ? "[Gambar]" : "");
     await supabaseAdmin.from("wa_messages").insert({
       conversation_id: conversation!.id,
@@ -425,7 +494,6 @@ serve(async (req) => {
       media_type: mediaType,
     });
 
-    // Update conversation timestamp
     await supabaseAdmin
       .from("wa_conversations")
       .update({ updated_at: new Date().toISOString() })
@@ -440,8 +508,6 @@ serve(async (req) => {
     }
 
     // === AI HANDLING ===
-
-    // === CONFIGURABLE AI PARAMETERS ===
     const historyLength = parseInt(cfg.history_length || "10");
     const charLimit = parseInt(cfg.history_char_limit || "3000");
     const ragLimit = parseInt(cfg.rag_result_count || "3");
@@ -449,7 +515,6 @@ serve(async (req) => {
     const noRagAction = cfg.no_rag_action || "escalate";
     const escalationKeyword = cfg.escalation_keyword || "ESKALASI_HUMAN";
 
-    // Fetch messages for context memory (configurable length)
     const { data: chatHistory } = await supabaseAdmin
       .from("wa_messages")
       .select("sender, content, media_url")
@@ -460,7 +525,6 @@ serve(async (req) => {
     const historyMessages = buildChatMessages(chatHistory || []);
     const trimmedMessages = trimHistoryByCharLimit(historyMessages, charLimit);
 
-    // Sector-based RAG search (configurable)
     const searchText = effectiveText || "";
     const roleTag = useSectorDetection && searchText ? detectSector(searchText) : null;
 
@@ -474,7 +538,6 @@ serve(async (req) => {
       });
       contextChunks = results || [];
 
-      // Fallback: retry without role_tag
       if (contextChunks.length === 0 && roleTag !== null) {
         const { data: globalResults } = await supabaseAdmin.rpc("search_documents", {
           p_client_id: clientId,
@@ -485,7 +548,6 @@ serve(async (req) => {
       }
     }
 
-    // Fallback: fetch latest documents directly
     if (contextChunks.length === 0) {
       const { data: fallback } = await supabaseAdmin
         .from("documents")
@@ -498,10 +560,8 @@ serve(async (req) => {
       contextChunks = fallback || [];
     }
 
-    // No-RAG Fallback: configurable action
     if (contextChunks.length === 0) {
       if (noRagAction === "answer_without") {
-        // Continue to AI without context
         console.log("No RAG context found, answering without context (configured)");
       } else if (noRagAction === "custom_message") {
         const customMsg = (cfg.no_rag_message || "Maaf, saya belum bisa menjawab pertanyaan ini.").replace(/^"|"$/g, "");
@@ -516,7 +576,6 @@ serve(async (req) => {
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       } else {
-        // Default: escalate
         await escalateToHuman(supabaseAdmin, conversation!.id, phoneNumber, instanceName, cfg);
         return new Response(
           JSON.stringify({ status: "escalated_no_knowledge" }),
@@ -546,7 +605,6 @@ serve(async (req) => {
     const aiTemperature = parseFloat(cfg.ai_temperature || "0.3");
     const aiMaxTokens = parseInt(cfg.ai_max_tokens || "1024");
 
-    // Build AI request with context memory (history) instead of single message
     const aiResponse = await fetch(
       "https://ai.gateway.lovable.dev/v1/chat/completions",
       {
@@ -579,7 +637,6 @@ serve(async (req) => {
     const aiData = await aiResponse.json();
     const answer = aiData.choices?.[0]?.message?.content?.trim() || "";
 
-    // Log token usage
     const tokenUsage = (aiData.usage?.prompt_tokens || 0) + (aiData.usage?.completion_tokens || 0);
     
     const { data: existingLog } = await supabaseAdmin

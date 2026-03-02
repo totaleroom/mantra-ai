@@ -13,7 +13,8 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Plus, RefreshCw, Server, Trash2, Activity, CheckCircle2, XCircle, AlertTriangle } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Loader2, Plus, RefreshCw, Server, Trash2, Activity, CheckCircle2, XCircle, AlertTriangle, Stethoscope, Wifi, WifiOff, Clock } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import InstanceCard from "@/components/admin/InstanceCard";
 
@@ -25,13 +26,20 @@ interface WaSession {
   qr_code: string | null;
   instance_name: string | null;
   last_error?: string | null;
+  last_webhook_event_at?: string | null;
 }
 interface VpsInstance { name: string; status: string; }
-interface HealthCheckResult {
+interface TestAllResult {
+  overall_status: string;
+  steps: { name: string; status: string; latency_ms?: number; detail: string }[];
+  sessions_summary: { connected: number; connecting: number; disconnected: number; error: number };
+}
+interface DiagnosticsResult {
   evolution_reachable: boolean;
-  instances: VpsInstance[];
-  webhook_status: Record<string, { configured: boolean; url?: string; enabled?: boolean; error?: string }>;
-  errors: string[];
+  latency_ms: number;
+  summary: { connected: number; connecting: number; disconnected: number; error: number; total_vps: number; total_db: number };
+  instance_details: any[];
+  recommendations: string[];
 }
 
 export default function DeviceManager() {
@@ -45,8 +53,10 @@ export default function DeviceManager() {
   const [vpsInstances, setVpsInstances] = useState<VpsInstance[] | null>(null);
   const [vpsOpen, setVpsOpen] = useState(false);
   const [deleteAllOpen, setDeleteAllOpen] = useState(false);
-  const [healthCheck, setHealthCheck] = useState<HealthCheckResult | null>(null);
-  const [healthLoading, setHealthLoading] = useState(false);
+  const [testAllResult, setTestAllResult] = useState<TestAllResult | null>(null);
+  const [testAllLoading, setTestAllLoading] = useState(false);
+  const [diagnostics, setDiagnostics] = useState<DiagnosticsResult | null>(null);
+  const [diagLoading, setDiagLoading] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -118,18 +128,34 @@ export default function DeviceManager() {
     return data;
   };
 
-  const handleHealthCheck = async () => {
-    setHealthLoading(true);
+  const handleTestAll = async () => {
+    setTestAllLoading(true);
     try {
-      const result = await callManageInstance("health-check", {});
-      setHealthCheck(result);
-      if (!result.evolution_reachable) {
-        toast({ variant: "destructive", title: "Evolution API tidak bisa dijangkau", description: "Periksa VPS dan service Evolution." });
+      const result = await callManageInstance("test-all", {});
+      setTestAllResult(result);
+      if (result.overall_status === "error") {
+        toast({ variant: "destructive", title: "Ada masalah terdeteksi", description: "Lihat detail di panel diagnostik." });
+      } else if (result.overall_status === "warn") {
+        toast({ title: "Perlu perhatian", description: "Beberapa komponen perlu dicek." });
+      } else {
+        toast({ title: "Semua OK ✅", description: "Sistem berjalan normal." });
       }
     } catch (e: any) {
-      toast({ variant: "destructive", title: "Health check gagal", description: e.message });
+      toast({ variant: "destructive", title: "Test gagal", description: e.message });
     } finally {
-      setHealthLoading(false);
+      setTestAllLoading(false);
+    }
+  };
+
+  const handleDiagnostics = async () => {
+    setDiagLoading(true);
+    try {
+      const result = await callManageInstance("diagnostics", {});
+      setDiagnostics(result);
+    } catch (e: any) {
+      toast({ variant: "destructive", title: "Diagnostik gagal", description: e.message });
+    } finally {
+      setDiagLoading(false);
     }
   };
 
@@ -224,60 +250,180 @@ export default function DeviceManager() {
     }
   };
 
+  const getStatusIcon = (status: string) => {
+    if (status === "ok") return <CheckCircle2 className="h-4 w-4 text-green-600" />;
+    if (status === "warn") return <AlertTriangle className="h-4 w-4 text-yellow-600" />;
+    return <XCircle className="h-4 w-4 text-destructive" />;
+  };
+
+  const formatTimeAgo = (dateStr: string | null | undefined) => {
+    if (!dateStr) return "Tidak diketahui";
+    const diff = Date.now() - new Date(dateStr).getTime();
+    if (diff < 60000) return `${Math.floor(diff / 1000)} detik lalu`;
+    if (diff < 3600000) return `${Math.floor(diff / 60000)} menit lalu`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)} jam lalu`;
+    return `${Math.floor(diff / 86400000)} hari lalu`;
+  };
+
   return (
     <div>
       <h1 className="mb-6 text-2xl font-bold text-foreground">Device & Connection</h1>
 
-      {/* Health Check Panel */}
+      {/* Test All Connections Panel */}
       <div className="mb-6 rounded-lg border border-border bg-card p-4">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
-            <Activity className="h-4 w-4" /> Kesehatan Integrasi
+            <Stethoscope className="h-4 w-4" /> Test Semua Koneksi
           </h2>
-          <Button size="sm" variant="outline" className="gap-2" onClick={handleHealthCheck} disabled={healthLoading}>
-            {healthLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-            Cek Sekarang
-          </Button>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" className="gap-2" onClick={handleDiagnostics} disabled={diagLoading}>
+              {diagLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Activity className="h-4 w-4" />}
+              Diagnostik Detail
+            </Button>
+            <Button size="sm" className="gap-2" onClick={handleTestAll} disabled={testAllLoading}>
+              {testAllLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+              Test Sekarang
+            </Button>
+          </div>
         </div>
-        {healthCheck ? (
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              {healthCheck.evolution_reachable
-                ? <Badge className="gap-1 bg-green-500/20 text-green-700 border-green-500/30"><CheckCircle2 className="h-3 w-3" /> Evolution API Aktif</Badge>
-                : <Badge className="gap-1 bg-destructive/20 text-destructive border-destructive/30"><XCircle className="h-3 w-3" /> Evolution API Tidak Aktif</Badge>
-              }
-              <Badge variant="outline" className="gap-1">
-                <Server className="h-3 w-3" /> {healthCheck.instances.length} instance
-              </Badge>
-            </div>
-            {healthCheck.errors.length > 0 && (
-              <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2">
-                {healthCheck.errors.map((err, i) => (
-                  <p key={i} className="text-xs text-destructive flex items-center gap-1">
-                    <AlertTriangle className="h-3 w-3 shrink-0" /> {err}
-                  </p>
-                ))}
-              </div>
-            )}
-            {Object.entries(healthCheck.webhook_status).length > 0 && (
-              <div className="space-y-1">
-                <p className="text-xs text-muted-foreground font-medium">Webhook Status:</p>
-                {Object.entries(healthCheck.webhook_status).map(([name, wh]) => (
-                  <div key={name} className="flex items-center gap-2 text-xs">
-                    <code className="text-xs">{name}</code>
-                    {wh.configured && wh.enabled
-                      ? <Badge className="gap-1 text-xs bg-green-500/20 text-green-700 border-green-500/30"><CheckCircle2 className="h-2.5 w-2.5" /> OK</Badge>
-                      : <Badge className="gap-1 text-xs bg-yellow-500/20 text-yellow-700 border-yellow-500/30"><AlertTriangle className="h-2.5 w-2.5" /> {wh.error || "Not configured"}</Badge>
-                    }
+
+        {testAllResult ? (
+          <div className="space-y-3">
+            {/* KPI Summary */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <Card className="bg-green-500/5 border-green-500/20">
+                <CardContent className="p-3 flex items-center gap-2">
+                  <Wifi className="h-4 w-4 text-green-600" />
+                  <div>
+                    <p className="text-lg font-bold text-green-700">{testAllResult.sessions_summary.connected}</p>
+                    <p className="text-xs text-muted-foreground">Connected</p>
                   </div>
-                ))}
-              </div>
-            )}
+                </CardContent>
+              </Card>
+              <Card className="bg-yellow-500/5 border-yellow-500/20">
+                <CardContent className="p-3 flex items-center gap-2">
+                  <Clock className="h-4 w-4 text-yellow-600" />
+                  <div>
+                    <p className="text-lg font-bold text-yellow-700">{testAllResult.sessions_summary.connecting}</p>
+                    <p className="text-xs text-muted-foreground">Connecting</p>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="bg-muted/50 border-border">
+                <CardContent className="p-3 flex items-center gap-2">
+                  <WifiOff className="h-4 w-4 text-muted-foreground" />
+                  <div>
+                    <p className="text-lg font-bold text-muted-foreground">{testAllResult.sessions_summary.disconnected}</p>
+                    <p className="text-xs text-muted-foreground">Disconnected</p>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="bg-destructive/5 border-destructive/20">
+                <CardContent className="p-3 flex items-center gap-2">
+                  <XCircle className="h-4 w-4 text-destructive" />
+                  <div>
+                    <p className="text-lg font-bold text-destructive">{testAllResult.sessions_summary.error}</p>
+                    <p className="text-xs text-muted-foreground">Error</p>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Steps */}
+            <div className="space-y-1">
+              {testAllResult.steps.map((step, i) => (
+                <div key={i} className="flex items-center gap-2 text-sm rounded-md px-3 py-1.5 bg-muted/30">
+                  {getStatusIcon(step.status)}
+                  <span className="font-medium min-w-[140px]">{step.name}</span>
+                  <span className="text-muted-foreground flex-1">{step.detail}</span>
+                  {step.latency_ms && <span className="text-xs text-muted-foreground">{step.latency_ms}ms</span>}
+                </div>
+              ))}
+            </div>
           </div>
         ) : (
-          <p className="text-xs text-muted-foreground">Klik "Cek Sekarang" untuk memeriksa koneksi Evolution API dan webhook.</p>
+          <p className="text-xs text-muted-foreground">Klik "Test Sekarang" untuk memeriksa semua komponen: Evolution API, webhook, database, dan heartbeat.</p>
         )}
       </div>
+
+      {/* Diagnostics Detail Panel */}
+      {diagnostics && (
+        <div className="mb-6 rounded-lg border border-border bg-card p-4">
+          <h2 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-3">
+            <Activity className="h-4 w-4" /> Diagnostik Detail
+          </h2>
+
+          <div className="flex items-center gap-3 mb-3 flex-wrap">
+            {diagnostics.evolution_reachable
+              ? <Badge className="gap-1 bg-green-500/20 text-green-700 border-green-500/30"><CheckCircle2 className="h-3 w-3" /> Evolution API Aktif ({diagnostics.latency_ms}ms)</Badge>
+              : <Badge className="gap-1 bg-destructive/20 text-destructive border-destructive/30"><XCircle className="h-3 w-3" /> Evolution API Tidak Aktif</Badge>
+            }
+            <Badge variant="outline" className="gap-1"><Server className="h-3 w-3" /> VPS: {diagnostics.summary.total_vps} | DB: {diagnostics.summary.total_db}</Badge>
+          </div>
+
+          {diagnostics.recommendations.length > 0 && (
+            <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 mb-3">
+              {diagnostics.recommendations.map((rec, i) => (
+                <p key={i} className="text-xs text-destructive flex items-center gap-1">
+                  <AlertTriangle className="h-3 w-3 shrink-0" /> {rec}
+                </p>
+              ))}
+            </div>
+          )}
+
+          {diagnostics.instance_details.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-muted-foreground">Detail per Instance:</p>
+              {diagnostics.instance_details.map((inst, i) => (
+                <div key={i} className="rounded-md border border-border px-3 py-2 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <code className="text-sm font-medium">{inst.instance_name}</code>
+                    <div className="flex items-center gap-2">
+                      {inst.in_vps && <Badge variant="outline" className="text-xs">VPS</Badge>}
+                      {inst.in_db && <Badge variant="outline" className="text-xs">DB</Badge>}
+                      <Badge className={`text-xs ${
+                        inst.db_status === "connected" ? "bg-green-500/20 text-green-700 border-green-500/30" :
+                        inst.db_status === "connecting" ? "bg-yellow-500/20 text-yellow-700 border-yellow-500/30" :
+                        inst.db_status === "error" ? "bg-destructive/20 text-destructive border-destructive/30" :
+                        "bg-muted text-muted-foreground border-border"
+                      }`}>
+                        {inst.db_status || inst.vps_status || "unknown"}
+                      </Badge>
+                    </div>
+                  </div>
+                  {inst.webhook && (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <span>Webhook:</span>
+                      {inst.webhook.configured && inst.webhook.enabled
+                        ? <span className="text-green-600">✓ Aktif</span>
+                        : <span className="text-yellow-600">✗ Tidak aktif</span>
+                      }
+                    </div>
+                  )}
+                  {inst.last_webhook_event_at && (
+                    <p className="text-xs text-muted-foreground">
+                      <Clock className="h-3 w-3 inline mr-1" />
+                      Event terakhir: {formatTimeAgo(inst.last_webhook_event_at)}
+                    </p>
+                  )}
+                  {inst.last_error && (
+                    <p className="text-xs text-destructive">{inst.last_error}</p>
+                  )}
+                  {inst.recommendations.length > 0 && (
+                    <div className="space-y-0.5">
+                      {inst.recommendations.map((rec: string, j: number) => (
+                        <p key={j} className="text-xs text-yellow-600 flex items-center gap-1">
+                          <AlertTriangle className="h-2.5 w-2.5 shrink-0" /> {rec}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Controls */}
       <div className="mb-6 flex items-center gap-3 flex-wrap">
