@@ -471,7 +471,63 @@ serve(async (req) => {
           : `${staleInstances.length} instance tidak ada event terbaru: ${staleInstances.join(", ")}`,
       });
 
-      // Step 4: Recent ops logs
+      // Step 4: Inbound webhook verification (VPS → Dashboard)
+      const pingId = `ping_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+      const webhookEndpoint = `${SUPABASE_URL}/functions/v1/wa-webhook`;
+      const WA_WEBHOOK_SECRET = Deno.env.get("WA_WEBHOOK_SECRET") || "";
+      
+      let inboundOk = false;
+      let inboundDetail = "";
+      const inboundStart = Date.now();
+      try {
+        const pingRes = await fetch(webhookEndpoint, {
+          method: "POST",
+          headers: { 
+            "Content-Type": "application/json",
+            "X-Webhook-Secret": WA_WEBHOOK_SECRET,
+          },
+          body: JSON.stringify({
+            event: "diagnostic.ping",
+            instance: "_diagnostic",
+            data: { ping_id: pingId },
+          }),
+        });
+        const inboundLatency = Date.now() - inboundStart;
+        
+        if (pingRes.ok) {
+          // Verify it was written to wa_ops_logs
+          await new Promise(r => setTimeout(r, 500)); // brief wait for DB write
+          const { data: pingLog } = await supabaseAdmin
+            .from("wa_ops_logs")
+            .select("id")
+            .eq("action", "diagnostic.ping")
+            .filter("metadata->>ping_id", "eq", pingId)
+            .maybeSingle();
+          
+          if (pingLog) {
+            inboundOk = true;
+            inboundDetail = `Webhook endpoint menerima & menyimpan ping (${inboundLatency}ms)`;
+          } else {
+            inboundDetail = `Webhook merespon OK tapi ping tidak tersimpan di database (${inboundLatency}ms)`;
+          }
+        } else {
+          const errText = await pingRes.text();
+          inboundDetail = `Webhook merespon HTTP ${pingRes.status}: ${errText.substring(0, 100)}`;
+        }
+      } catch (e) {
+        inboundDetail = `Tidak bisa menghubungi webhook endpoint: ${e instanceof Error ? e.message : String(e)}`;
+      }
+      
+      steps.push({
+        name: "Inbound Webhook (VPS→Dashboard)",
+        status: inboundOk ? "ok" : "error",
+        latency_ms: Date.now() - inboundStart,
+        detail: inboundDetail,
+      });
+      if (!inboundOk) overallStatus = overallStatus === "error" ? "error" : "warn";
+
+      // Step 5: Recent ops logs
       const { data: recentLogs } = await supabaseAdmin
         .from("wa_ops_logs")
         .select("action, status, error_message, created_at")
