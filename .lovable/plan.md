@@ -1,30 +1,41 @@
 
+Diagnosa cepat (berdasarkan investigasi):
+- Kode saat ini sudah tidak punya CSP meta di `index.html`.
+- Dari runtime uji saya, halaman `/` sebenarnya bisa render normal.
+- Gejala kamu (“halaman putih kosong” + tidak ada network/console) paling konsisten dengan masalah bootstrap render di preview session tertentu, dan `framebusting` di `src/main.tsx` adalah titik paling sensitif untuk kasus iframe preview.
 
-# Fix: Preview Tidak Tampil Karena CSP Terlalu Ketat
+Rencana perbaikan (tanpa ubah arsitektur backend):
 
-## Akar Masalah
+1) Kerasikan startup render agar tidak bisa “diam putih”
+- File: `src/main.tsx`
+- Ubah bootstrap jadi `try/catch`:
+  - kalau render gagal, tampilkan fallback HTML error yang jelas (bukan blank putih)
+  - log error startup ke console agar mudah didiagnosa di preview
 
-File `index.html` baris 7 memiliki Content Security Policy yang membatasi `script-src` hanya ke `'self' 'unsafe-inline'`. Lovable preview membutuhkan koneksi ke domain tambahan (untuk HMR, tagger, dll) yang diblokir oleh CSP ini.
+2) Revisi logika anti-iframe agar aman untuk environment preview
+- File: `src/main.tsx`
+- Ganti check `window.top !== window.self` yang sekarang dengan kebijakan berbasis host + mode:
+  - Preview/dev host: selalu izinkan render
+  - Production host: tetap boleh pakai anti-framing
+- Tujuan: keamanan production tetap ada, tapi preview tidak pernah terblokir diam-diam.
 
-## Solusi
+3) Tambahkan ErrorBoundary global di akar aplikasi
+- File: `src/App.tsx` (atau `src/main.tsx`)
+- Bungkus seluruh app dengan `ErrorBoundary` (komponen sudah ada di `src/components/ErrorBoundary.tsx`)
+- Efek: jika ada error runtime di landing route sekalipun, user lihat pesan error + tombol reload, bukan layar putih.
 
-Pindahkan CSP dari `index.html` ke `nginx.conf` saja (untuk production). Dengan begitu:
-- **Di Lovable preview** (development): tidak ada CSP yang memblokir → preview berjalan normal
-- **Di VPS production** (via Nginx): CSP tetap aktif dan melindungi
+4) Tambahkan indikator “boot success” ringan untuk debugging cepat
+- File: `src/main.tsx`
+- Setelah `createRoot(...).render(...)`, set marker sederhana (mis. `window.__APP_BOOTED__ = true`)
+- Dipakai untuk membedakan: app tidak boot vs app boot tapi gagal di komponen.
 
-## Perubahan
+5) Validasi setelah implementasi
+- Buka `/` di preview dan pastikan konten hero muncul.
+- Buka `/login` dan pastikan halaman tampil (minimal UI render, tanpa blank).
+- Cek console preview: tidak ada error fatal saat bootstrap.
+- Pastikan tidak ada regresi keamanan di production (anti-framing masih aktif untuk host production).
 
-### File: `index.html`
-- **Hapus** baris meta CSP (`<meta http-equiv="Content-Security-Policy" ...>`)
-
-### File: `nginx.conf`
-- **Tambah** header CSP yang sama sebagai response header Nginx (sudah ada security headers lain di sana)
-
-Ini adalah best practice: CSP di level web server, bukan di HTML meta tag, karena lebih fleksibel dan bisa di-override per environment.
-
-## File Terdampak
-| File | Aksi |
-|------|------|
-| `index.html` | Hapus 1 baris meta CSP |
-| `nginx.conf` | Tambah `add_header Content-Security-Policy` |
-
+Technical details (ringkas):
+- Akar risiko ada di startup path (`main.tsx`) karena satu exception sebelum React mount akan menghasilkan blank page tanpa boundary.
+- `ErrorBoundary` hanya menangkap error di tree React, bukan error sebelum mount; karena itu perlu kombinasi `try/catch bootstrap + ErrorBoundary global`.
+- Pendekatan ini memperbaiki observability (kelihatan errornya) dan stabilitas preview tanpa melepas kontrol keamanan production.
