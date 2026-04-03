@@ -295,6 +295,7 @@ sudo systemctl restart nginx
 | **Ops Logs** | Audit trail semua operasi instance (wa_ops_logs) | ✅ Ready |
 | **Code Splitting** | Lazy-load halaman admin & komponen berat landing | ✅ Ready |
 | **Error Boundary** | Crash isolation per halaman admin | ✅ Ready |
+| **System Snapshot** | API endpoint JSON status sistem untuk integrasi AI chatbot | ✅ Ready |
 
 ---
 
