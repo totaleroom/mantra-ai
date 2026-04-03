@@ -20,3 +20,6 @@ verify_jwt = false
 
 [functions.manage-wa-instance]
 verify_jwt = false
+
+[functions.system-snapshot]
+verify_jwt = false
