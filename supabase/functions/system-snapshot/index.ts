@@ -22,8 +22,9 @@ serve(async (req) => {
     const apiKey = req.headers.get("X-Api-Key");
 
     if (apiKey) {
-      // Simple API key auth — compare with service role key
-      if (apiKey !== serviceRoleKey) {
+      // Custom API key auth — compare with SNAPSHOT_API_KEY secret
+      const snapshotApiKey = Deno.env.get("SNAPSHOT_API_KEY");
+      if (!snapshotApiKey || apiKey !== snapshotApiKey) {
         return new Response(JSON.stringify({ error: "Invalid API key" }), {
           status: 403,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
