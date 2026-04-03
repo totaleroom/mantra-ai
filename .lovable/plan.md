@@ -1,41 +1,117 @@
 
-Diagnosa cepat (berdasarkan investigasi):
-- Kode saat ini sudah tidak punya CSP meta di `index.html`.
-- Dari runtime uji saya, halaman `/` sebenarnya bisa render normal.
-- Gejala kamu (“halaman putih kosong” + tidak ada network/console) paling konsisten dengan masalah bootstrap render di preview session tertentu, dan `framebusting` di `src/main.tsx` adalah titik paling sensitif untuk kasus iframe preview.
 
-Rencana perbaikan (tanpa ubah arsitektur backend):
+# Setup AstrBot di VPS Debian 12 + Integrasi System Snapshot MANTRA AI
 
-1) Kerasikan startup render agar tidak bisa “diam putih”
-- File: `src/main.tsx`
-- Ubah bootstrap jadi `try/catch`:
-  - kalau render gagal, tampilkan fallback HTML error yang jelas (bukan blank putih)
-  - log error startup ke console agar mudah didiagnosa di preview
+## Konteks
 
-2) Revisi logika anti-iframe agar aman untuk environment preview
-- File: `src/main.tsx`
-- Ganti check `window.top !== window.self` yang sekarang dengan kebijakan berbasis host + mode:
-  - Preview/dev host: selalu izinkan render
-  - Production host: tetap boleh pakai anti-framing
-- Tujuan: keamanan production tetap ada, tapi preview tidak pernah terblokir diam-diam.
+Kamu punya VPS Debian 12 (2vCPU, 4GB RAM + 4GB swap) dengan CasaOS, dan ingin AstrBot (menggunakan Qwen3 235B / Qwen3.5-Flash) bisa "membaca" kondisi dashboard MANTRA AI untuk bantu troubleshooting dan pengembangan.
 
-3) Tambahkan ErrorBoundary global di akar aplikasi
-- File: `src/App.tsx` (atau `src/main.tsx`)
-- Bungkus seluruh app dengan `ErrorBoundary` (komponen sudah ada di `src/components/ErrorBoundary.tsx`)
-- Efek: jika ada error runtime di landing route sekalipun, user lihat pesan error + tombol reload, bukan layar putih.
+## Arsitektur Integrasi
 
-4) Tambahkan indikator “boot success” ringan untuk debugging cepat
-- File: `src/main.tsx`
-- Setelah `createRoot(...).render(...)`, set marker sederhana (mis. `window.__APP_BOOTED__ = true`)
-- Dipakai untuk membedakan: app tidak boot vs app boot tapi gagal di komponen.
+```text
+┌─────────────────────────┐
+│  MANTRA AI Dashboard    │
+│  (Lovable Cloud)        │
+│                         │
+│  Edge Function:         │
+│  system-snapshot ──────────┐
+└─────────────────────────┘  │  HTTPS GET (auth)
+                             │
+┌────────────────────────────▼──────────┐
+│  VPS Debian 12 + CasaOS               │
+│                                        │
+│  ┌──────────┐  ┌────────────────────┐  │
+│  │ AstrBot  │──│ Qwen3 / Qwen3.5   │  │
+│  │ (Docker) │  │ (Ollama/vLLM)     │  │
+│  └──────────┘  └────────────────────┘  │
+│  ┌──────────────┐  ┌──────────────┐    │
+│  │ Evolution API│  │ Frontend     │    │
+│  │ :8080        │  │ :3000        │    │
+│  └──────────────┘  └──────────────┘    │
+└────────────────────────────────────────┘
+```
 
-5) Validasi setelah implementasi
-- Buka `/` di preview dan pastikan konten hero muncul.
-- Buka `/login` dan pastikan halaman tampil (minimal UI render, tanpa blank).
-- Cek console preview: tidak ada error fatal saat bootstrap.
-- Pastikan tidak ada regresi keamanan di production (anti-framing masih aktif untuk host production).
+## Langkah 1: Buat Edge Function `system-snapshot` (saya implementasi)
 
-Technical details (ringkas):
-- Akar risiko ada di startup path (`main.tsx`) karena satu exception sebelum React mount akan menghasilkan blank page tanpa boundary.
-- `ErrorBoundary` hanya menangkap error di tree React, bukan error sebelum mount; karena itu perlu kombinasi `try/catch bootstrap + ErrorBoundary global`.
-- Pendekatan ini memperbaiki observability (kelihatan errornya) dan stabilitas preview tanpa melepas kontrol keamanan production.
+Edge function baru yang mengembalikan 1 JSON berisi:
+- Daftar clients + quota + status
+- Semua wa_sessions (status, last_error, last_webhook_event)
+- Message stats hari ini (total messages, tokens)
+- Platform settings aktif
+- Document stats per client
+- Recent wa_ops_logs (10 terakhir)
+
+Endpoint: `GET /functions/v1/system-snapshot` (admin auth required)
+
+Output contoh:
+```json
+{
+  "timestamp": "2026-04-03T...",
+  "clients": [...],
+  "wa_sessions": [...],
+  "message_stats_today": { "total_messages": 150, "total_tokens": 45000 },
+  "platform_settings": { "ai_model": "gemini-2.5-flash", ... },
+  "documents": { "total": 23, "by_status": { "ready": 20, "processing": 3 } },
+  "recent_ops_logs": [...]
+}
+```
+
+## Langkah 2: Setup AstrBot di VPS (panduan untuk kamu)
+
+AstrBot bisa diinstall via CasaOS App Store atau Docker manual:
+
+```bash
+docker run -d \
+  --name astrbot \
+  -p 6185:6185 \
+  -v /opt/astrbot/data:/AstrBot/data \
+  --restart unless-stopped \
+  soulter/astrbot:latest
+```
+
+Akses dashboard AstrBot di `http://<VPS-IP>:6185`.
+
+### Catatan RAM untuk Qwen3 235B A22B:
+- Model ini butuh ~50GB VRAM minimum (quantized Q4). VPS 4GB RAM **tidak cukup** untuk menjalankan model ini secara lokal.
+- **Rekomendasi**: Gunakan Qwen3 235B via API cloud (OpenRouter, Together AI, atau self-hosted di GPU server terpisah), lalu set endpoint di AstrBot.
+- Qwen3.5-Flash lebih ringan tapi tetap butuh ~8-16GB — masih mepet untuk VPS 4GB + swap.
+- Alternatif lokal yang realistis: Qwen3-8B atau Qwen3-4B via Ollama.
+
+## Langkah 3: Konfigurasi AstrBot untuk membaca snapshot
+
+Di AstrBot, buat **custom plugin** atau gunakan fitur "tool/function calling":
+
+1. **Tambahkan tool "check_mantra_status"** yang memanggil:
+   ```
+   GET https://jvyklrivwjubuwjdmvfq.supabase.co/functions/v1/system-snapshot
+   Headers: Authorization: Bearer <admin-jwt-token>
+   ```
+
+2. **System prompt untuk AstrBot**:
+   ```
+   Kamu adalah asisten teknis untuk platform MANTRA AI.
+   Gunakan tool check_mantra_status untuk melihat kondisi sistem terkini.
+   Bantu admin mendiagnosa masalah WhatsApp, koneksi, dan quota.
+   ```
+
+3. **Refresh token**: JWT token expired setelah 1 jam. Untuk long-running bot, gunakan service role key atau buat endpoint tanpa JWT (dengan API key custom sebagai gantinya).
+
+## Langkah 4: Tambah service AstrBot ke docker-compose (opsional)
+
+Saya akan menambahkan block AstrBot (commented out) ke `docker-compose.yml` agar tinggal uncomment.
+
+## Yang Saya Implementasi
+
+| File | Aksi |
+|------|------|
+| `supabase/functions/system-snapshot/index.ts` | Edge function baru — JSON snapshot seluruh sistem |
+| `docker-compose.yml` | Tambah block AstrBot (commented) |
+| `README.md` | Tambah section "Integrasi AstrBot" |
+
+## Yang Perlu Kamu Lakukan di VPS
+
+1. Install AstrBot via Docker atau CasaOS
+2. Pilih model yang sesuai RAM (rekomendasi: pakai API cloud untuk Qwen3 235B)
+3. Konfigurasi tool/plugin di AstrBot untuk memanggil endpoint system-snapshot
+4. Test dengan bertanya: "Bagaimana status sistem MANTRA AI sekarang?"
+
