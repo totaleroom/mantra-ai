@@ -295,6 +295,7 @@ sudo systemctl restart nginx
 | **Ops Logs** | Audit trail semua operasi instance (wa_ops_logs) | ✅ Ready |
 | **Code Splitting** | Lazy-load halaman admin & komponen berat landing | ✅ Ready |
 | **Error Boundary** | Crash isolation per halaman admin | ✅ Ready |
+| **System Snapshot** | API endpoint JSON status sistem untuk integrasi AI chatbot | ✅ Ready |
 
 ---
 
@@ -330,6 +331,48 @@ sudo systemctl restart nginx
 - **Input validation** menggunakan Zod schema
 - **Email verification** wajib sebelum bisa login
 - **Webhook secret** untuk verifikasi event WhatsApp
+
+---
+
+## 🤖 Integrasi AstrBot
+
+### Prasyarat
+
+- VPS Debian 12+ dengan Docker
+- AstrBot terinstall (`soulter/astrbot:latest`)
+
+### Setup
+
+1. **Install AstrBot**:
+   ```bash
+   docker run -d --name astrbot -p 6185:6185 \
+     -v /opt/astrbot/data:/AstrBot/data \
+     --restart unless-stopped soulter/astrbot:latest
+   ```
+
+2. **Endpoint System Snapshot**:
+   ```
+   GET https://<SUPABASE_URL>/functions/v1/system-snapshot
+   Headers: Authorization: Bearer <admin-jwt-token>
+   ```
+
+3. **Konfigurasi tool di AstrBot** — buat tool `check_mantra_status` yang memanggil endpoint di atas.
+
+4. **System prompt untuk AstrBot**:
+   ```
+   Kamu adalah asisten teknis untuk platform MANTRA AI.
+   Gunakan tool check_mantra_status untuk melihat kondisi sistem terkini.
+   Bantu admin mendiagnosa masalah WhatsApp, koneksi, dan quota.
+   ```
+
+### Catatan Model
+
+| Model | VRAM/RAM | Cocok untuk VPS 4GB? |
+|-------|----------|---------------------|
+| Qwen3 235B A22B | ~50GB+ | ❌ Pakai API cloud |
+| Qwen3.5-Flash | ~8-16GB | ⚠️ Mepet |
+| Qwen3-8B | ~5-6GB | ✅ Via Ollama |
+| Qwen3-4B | ~3GB | ✅ Ringan |
 
 ---
 

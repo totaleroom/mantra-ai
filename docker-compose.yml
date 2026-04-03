@@ -29,6 +29,17 @@ services:
     networks:
       - mantra-net
 
+  # ─── AstrBot (AI Assistant, uncomment jika siap) ───
+  # astrbot:
+  #   image: soulter/astrbot:latest
+  #   ports:
+  #     - "6185:6185"
+  #   volumes:
+  #     - astrbot_data:/AstrBot/data
+  #   restart: unless-stopped
+  #   networks:
+  #     - mantra-net
+
   # ─── Plan B: WWeb.js (opsional, uncomment jika siap) ───
   # wwebjs:
   #   build:
@@ -47,6 +58,7 @@ services:
 
 volumes:
   evolution_data:
+  # astrbot_data:
   # wwebjs_sessions:
 
 networks:
