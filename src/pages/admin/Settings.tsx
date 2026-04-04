@@ -18,7 +18,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Switch } from "@/components/ui/switch";
-import { Loader2, Plus, Trash2, TestTube, Save, Copy, CheckCircle, ArrowRight, Brain, MessageSquare, Database } from "lucide-react";
+import { Loader2, Plus, Trash2, TestTube, Save, Copy, CheckCircle, ArrowRight, Brain, MessageSquare, Database, Activity, Wifi, WifiOff, Clock } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSettings, useAdminUsers } from "@/hooks/useAdminData";
@@ -28,6 +28,16 @@ interface Admin {
   user_id: string;
   email: string;
   created_at: string;
+}
+
+interface DiagnosticsResult {
+  success: boolean;
+  instances: number;
+  latency_ms: number;
+  auth_valid: boolean;
+  reachable: boolean;
+  error_detail: string | null;
+  http_status: number | null;
 }
 
 const PROMPT_PRESETS: Record<string, string> = {
@@ -50,9 +60,9 @@ export default function Settings() {
   const [invitePassword, setInvitePassword] = useState("");
   const [inviting, setInviting] = useState(false);
 
-  // Evolution test
+  // Evolution test & diagnostics
   const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [diagnostics, setDiagnostics] = useState<DiagnosticsResult | null>(null);
   const [copied, setCopied] = useState(false);
 
   const webhookUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/wa-webhook`;
@@ -70,8 +80,6 @@ export default function Settings() {
 
   const loading = loadingSettings && loadingAdmins;
 
-  // loadAdmins is handled by useAdminUsers hook
-
   const saveSettings = async (updates: Record<string, string>) => {
     setSaving(true);
     const res = await supabase.functions.invoke("manage-settings", { body: { settings: updates } });
@@ -80,6 +88,8 @@ export default function Settings() {
     } else {
       toast({ title: "Settings disimpan" });
       setSettings((prev) => ({ ...prev, ...updates }));
+      // Invalidate ALL queries so every module picks up new config immediately
+      qc.invalidateQueries();
     }
     setSaving(false);
   };
@@ -112,7 +122,7 @@ export default function Settings() {
 
   const handleTestEvolution = async () => {
     setTesting(true);
-    setTestResult(null);
+    setDiagnostics(null);
     const session = await supabase.auth.getSession();
     const token = session.data.session?.access_token;
     try {
@@ -131,13 +141,18 @@ export default function Settings() {
           }),
         }
       );
-      const data = await directRes.json();
-      setTestResult({
-        success: data.success,
-        message: data.success ? `Terhubung! ${data.instances} instance ditemukan.` : `Gagal: ${data.error}`,
-      });
+      const data: DiagnosticsResult = await directRes.json();
+      setDiagnostics(data);
     } catch {
-      setTestResult({ success: false, message: "Koneksi gagal" });
+      setDiagnostics({
+        success: false,
+        instances: 0,
+        latency_ms: 0,
+        auth_valid: false,
+        reachable: false,
+        error_detail: "Koneksi gagal — tidak bisa menghubungi server",
+        http_status: null,
+      });
     }
     setTesting(false);
   };
@@ -162,6 +177,18 @@ export default function Settings() {
   const handlePromptManualEdit = (value: string) => {
     setActivePreset("custom");
     updateSetting("ai_system_prompt", JSON.stringify(value));
+  };
+
+  // Connection status badge helper
+  const getConnectionBadge = () => {
+    if (!diagnostics) return null;
+    if (diagnostics.success && diagnostics.latency_ms < 500) {
+      return <Badge className="bg-green-500/20 text-green-400 border-green-500/30 gap-1"><Wifi className="h-3 w-3" /> Connected ({diagnostics.latency_ms}ms)</Badge>;
+    }
+    if (diagnostics.success && diagnostics.latency_ms >= 500) {
+      return <Badge className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30 gap-1"><Clock className="h-3 w-3" /> Slow ({diagnostics.latency_ms}ms)</Badge>;
+    }
+    return <Badge variant="destructive" className="gap-1"><WifiOff className="h-3 w-3" /> Unreachable</Badge>;
   };
 
   if (loading) {
@@ -258,9 +285,12 @@ export default function Settings() {
         {/* Tab 2: WhatsApp API */}
         <TabsContent value="whatsapp">
           <div className="rounded-lg border border-border bg-card p-6 space-y-6">
-            <div>
-              <h3 className="text-sm font-semibold text-foreground mb-1">WhatsApp / Evolution API</h3>
-              <p className="text-xs text-muted-foreground">Konfigurasi koneksi ke Evolution API untuk WhatsApp.</p>
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold text-foreground mb-1">WhatsApp / Evolution API</h3>
+                <p className="text-xs text-muted-foreground">Konfigurasi koneksi ke Evolution API. Perubahan langsung berlaku di semua modul.</p>
+              </div>
+              {getConnectionBadge()}
             </div>
             <Separator />
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -288,15 +318,62 @@ export default function Settings() {
                 </Button>
               </div>
             </div>
-            <div className="flex items-center gap-3">
-              <Button variant="outline" onClick={handleTestEvolution} disabled={testing}>
-                {testing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <TestTube className="mr-2 h-4 w-4" />}
-                Test Connection
-              </Button>
-              {testResult && (
-                <Badge variant={testResult.success ? "default" : "destructive"}>{testResult.message}</Badge>
+
+            {/* Test & Diagnostics */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-3">
+                <Button variant="outline" onClick={handleTestEvolution} disabled={testing}>
+                  {testing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <TestTube className="mr-2 h-4 w-4" />}
+                  Verify Integration
+                </Button>
+              </div>
+
+              {/* Live Diagnostics Panel */}
+              {diagnostics && (
+                <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Activity className="h-4 w-4 text-primary" />
+                    <span className="text-sm font-semibold text-foreground">Live Diagnostics</span>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="rounded border border-border bg-background p-3 text-center">
+                      <p className="text-xs text-muted-foreground">Latency</p>
+                      <p className={`text-lg font-bold ${diagnostics.latency_ms < 500 ? "text-green-400" : diagnostics.latency_ms < 1500 ? "text-yellow-400" : "text-destructive"}`}>
+                        {diagnostics.latency_ms}ms
+                      </p>
+                    </div>
+                    <div className="rounded border border-border bg-background p-3 text-center">
+                      <p className="text-xs text-muted-foreground">Reachable</p>
+                      <p className={`text-lg font-bold ${diagnostics.reachable ? "text-green-400" : "text-destructive"}`}>
+                        {diagnostics.reachable ? "Yes" : "No"}
+                      </p>
+                    </div>
+                    <div className="rounded border border-border bg-background p-3 text-center">
+                      <p className="text-xs text-muted-foreground">Auth Valid</p>
+                      <p className={`text-lg font-bold ${diagnostics.auth_valid ? "text-green-400" : "text-destructive"}`}>
+                        {diagnostics.auth_valid ? "Yes" : "No"}
+                      </p>
+                    </div>
+                    <div className="rounded border border-border bg-background p-3 text-center">
+                      <p className="text-xs text-muted-foreground">Instances</p>
+                      <p className="text-lg font-bold text-foreground">{diagnostics.instances}</p>
+                    </div>
+                  </div>
+                  {diagnostics.http_status && !diagnostics.success && (
+                    <div className="text-xs text-muted-foreground">
+                      HTTP Status: <span className="text-destructive font-mono">{diagnostics.http_status}</span>
+                    </div>
+                  )}
+                  {diagnostics.error_detail && (
+                    <div className="rounded border border-destructive/30 bg-destructive/10 p-3">
+                      <p className="text-xs font-medium text-destructive mb-1">Error Detail:</p>
+                      <code className="text-xs text-destructive/80 break-all">{diagnostics.error_detail}</code>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
+
             <Button onClick={() => saveSettings({ evolution_api_url: settings.evolution_api_url || "", evolution_api_key: settings.evolution_api_key || "", wa_webhook_secret: settings.wa_webhook_secret || "" })} disabled={saving}>
               {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               <Save className="mr-2 h-4 w-4" /> Simpan
