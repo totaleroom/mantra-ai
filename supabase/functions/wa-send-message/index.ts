@@ -8,34 +8,53 @@ const corsHeaders = {
 };
 
 /**
+ * Dynamic Config Engine: reads from platform_settings first, fallback to env.
+ */
+async function getConfig(supabase: any): Promise<Record<string, string>> {
+  const { data } = await supabase.from("platform_settings").select("key, value");
+  const db: Record<string, string> = {};
+  for (const row of data || []) db[row.key] = row.value;
+  return {
+    evolution_api_url: db.evolution_api_url || Deno.env.get("EVOLUTION_API_URL") || "",
+    evolution_api_key: db.evolution_api_key || Deno.env.get("EVOLUTION_API_KEY") || "",
+    wa_webhook_secret: db.wa_webhook_secret || Deno.env.get("WA_WEBHOOK_SECRET") || "",
+    anti_ban_delay_min: db.anti_ban_delay_min || "2",
+    anti_ban_delay_max: db.anti_ban_delay_max || "4",
+  };
+}
+
+/**
  * wa-send-message: Send a WhatsApp message via Evolution API
  * 
  * Body: { instance_name, phone_number, message, conversation_id?, sender? }
  * 
- * - Sends typing indicator (composing) for 2-4 seconds
- * - Sends text message
- * - Optionally logs to wa_messages if conversation_id + sender provided
+ * Now uses Dynamic Config Engine — reads API URL/key from platform_settings,
+ * falls back to env secrets.
  */
 serve(async (req) => {
   if (req.method === "OPTIONS")
     return new Response(null, { headers: corsHeaders });
 
   try {
-    const EVOLUTION_API_URL = Deno.env.get("EVOLUTION_API_URL");
-    const EVOLUTION_API_KEY = Deno.env.get("EVOLUTION_API_KEY");
-
-    if (!EVOLUTION_API_URL || !EVOLUTION_API_KEY) {
-      throw new Error("Evolution API not configured. Set EVOLUTION_API_URL and EVOLUTION_API_KEY secrets.");
-    }
-
     // Auth: accept either Bearer token (admin dashboard) or webhook secret (internal call)
     const authHeader = req.headers.get("Authorization");
     const webhookSecret = req.headers.get("X-Webhook-Secret");
-    const WA_WEBHOOK_SECRET = Deno.env.get("WA_WEBHOOK_SECRET");
+
+    const supabaseAdmin = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+    );
+
+    // Load dynamic config
+    const cfg = await getConfig(supabaseAdmin);
+
+    if (!cfg.evolution_api_url || !cfg.evolution_api_key) {
+      throw new Error("Evolution API not configured. Set evolution_api_url and evolution_api_key in Settings or as secrets.");
+    }
 
     let isAuthenticated = false;
 
-    if (webhookSecret && WA_WEBHOOK_SECRET && webhookSecret === WA_WEBHOOK_SECRET) {
+    if (webhookSecret && cfg.wa_webhook_secret && webhookSecret === cfg.wa_webhook_secret) {
       isAuthenticated = true;
     } else if (authHeader?.startsWith("Bearer ")) {
       const supabaseAuth = createClient(
@@ -63,18 +82,17 @@ serve(async (req) => {
       throw new Error("instance_name, phone_number, and message are required");
     }
 
-    // Normalize phone number (remove + and non-digits)
     const normalizedPhone = phone_number.replace(/\D/g, "");
+    const baseUrl = cfg.evolution_api_url.replace(/\/$/, "");
+    const apiKey = cfg.evolution_api_key;
 
     // 1. Send typing indicator (composing)
-    const baseUrl = EVOLUTION_API_URL.replace(/\/$/, "");
-    
     try {
       await fetch(`${baseUrl}/chat/presence/${instance_name}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          apikey: EVOLUTION_API_KEY,
+          apikey: apiKey,
         },
         body: JSON.stringify({
           number: normalizedPhone,
@@ -85,8 +103,10 @@ serve(async (req) => {
       console.warn("Typing indicator failed (non-critical):", e);
     }
 
-    // 2. Random delay 2-4 seconds (anti-ban SOP)
-    const delay = 2000 + Math.random() * 2000;
+    // 2. Anti-ban delay from dynamic config
+    const delayMin = parseFloat(cfg.anti_ban_delay_min) * 1000;
+    const delayMax = parseFloat(cfg.anti_ban_delay_max) * 1000;
+    const delay = delayMin + Math.random() * (delayMax - delayMin);
     await new Promise((resolve) => setTimeout(resolve, delay));
 
     // 3. Send message
@@ -94,7 +114,7 @@ serve(async (req) => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        apikey: EVOLUTION_API_KEY,
+        apikey: apiKey,
       },
       body: JSON.stringify({
         number: normalizedPhone,
@@ -112,10 +132,6 @@ serve(async (req) => {
 
     // 4. Log message to wa_messages if conversation_id provided
     if (conversation_id && sender) {
-      const supabaseAdmin = createClient(
-        Deno.env.get("SUPABASE_URL")!,
-        Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-      );
       await supabaseAdmin.from("wa_messages").insert({
         conversation_id,
         sender,

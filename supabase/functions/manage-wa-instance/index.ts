@@ -7,6 +7,21 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+/**
+ * Dynamic Config Engine: reads from platform_settings first, fallback to env.
+ * To change API URL/key, update Settings in dashboard — no code change needed.
+ */
+async function getConfig(supabase: any): Promise<Record<string, string>> {
+  const { data } = await supabase.from("platform_settings").select("key, value");
+  const db: Record<string, string> = {};
+  for (const row of data || []) db[row.key] = row.value;
+  return {
+    evolution_api_url: db.evolution_api_url || Deno.env.get("EVOLUTION_API_URL") || "",
+    evolution_api_key: db.evolution_api_key || Deno.env.get("EVOLUTION_API_KEY") || "",
+    wa_webhook_secret: db.wa_webhook_secret || Deno.env.get("WA_WEBHOOK_SECRET") || "",
+  };
+}
+
 /** Try to set webhook with camelCase format first, fallback to nested format */
 async function setWebhookWithFallback(
   baseUrl: string,
@@ -18,7 +33,6 @@ async function setWebhookWithFallback(
   const encoded = encodeURIComponent(instanceName);
   const events = ["MESSAGES_UPSERT", "CONNECTION_UPDATE", "QRCODE_UPDATED"];
 
-  // Format A: camelCase flat (Evolution v2)
   try {
     const resA = await fetch(`${baseUrl}/webhook/set/${encoded}`, {
       method: "POST",
@@ -132,32 +146,28 @@ serve(async (req) => {
       });
     }
 
-    const EVOLUTION_API_URL = Deno.env.get("EVOLUTION_API_URL");
-    const EVOLUTION_API_KEY = Deno.env.get("EVOLUTION_API_KEY");
-    if (!EVOLUTION_API_URL || !EVOLUTION_API_KEY) {
-      throw new Error("Evolution API not configured");
-    }
-    const baseUrl = EVOLUTION_API_URL.replace(/\/$/, "");
-
     const supabaseAdmin = createClient(
       Deno.env.get("SUPABASE_URL")!,
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
+    // === Dynamic Config: DB first, env fallback ===
+    const cfg = await getConfig(supabaseAdmin);
+
+    if (!cfg.evolution_api_url || !cfg.evolution_api_key) {
+      throw new Error("Evolution API not configured. Update Settings → WhatsApp API in dashboard.");
+    }
+    const baseUrl = cfg.evolution_api_url.replace(/\/$/, "");
+    const EVOLUTION_API_KEY = cfg.evolution_api_key;
+
     const url = new URL(req.url);
     const action = url.searchParams.get("action");
 
-    // Helper to get webhook config
+    // Helper to get webhook config (also dynamic)
     const getWebhookConfig = async () => {
-      const { data: secretRow } = await supabaseAdmin
-        .from("platform_settings")
-        .select("value")
-        .eq("key", "wa_webhook_secret")
-        .maybeSingle();
-      const webhookSecret = secretRow?.value || Deno.env.get("WA_WEBHOOK_SECRET") || "";
       const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
       const webhookUrl = `${SUPABASE_URL}/functions/v1/wa-webhook`;
-      return { webhookUrl, webhookSecret };
+      return { webhookUrl, webhookSecret: cfg.wa_webhook_secret };
     };
 
     // Helper to update session with error
@@ -235,7 +245,6 @@ serve(async (req) => {
         result.errors.push(`Cannot reach Evolution API: ${e instanceof Error ? e.message : String(e)}`);
       }
 
-      // Check webhook config for each instance
       if (result.evolution_reachable && result.instances.length > 0) {
         for (const inst of result.instances) {
           try {
@@ -268,7 +277,7 @@ serve(async (req) => {
       );
     }
 
-    // --- DIAGNOSTICS: comprehensive per-instance diagnosis ---
+    // --- DIAGNOSTICS ---
     if (action === "diagnostics") {
       const { webhookUrl } = await getWebhookConfig();
       
@@ -282,7 +291,6 @@ serve(async (req) => {
         recommendations: [],
       };
 
-      // 1. Ping Evolution
       const pingStart = Date.now();
       let vpsInstances: any[] = [];
       try {
@@ -309,14 +317,12 @@ serve(async (req) => {
       }));
       result.summary.total_vps = vpsInstances.length;
 
-      // 2. Get DB sessions
       const { data: dbSessions } = await supabaseAdmin
         .from("wa_sessions")
         .select("id, client_id, instance_name, status, qr_code, last_error, last_webhook_event_at, updated_at");
       result.db_sessions = dbSessions || [];
       result.summary.total_db = (dbSessions || []).length;
 
-      // 3. Build per-instance details
       const allNames = new Set<string>();
       for (const v of vpsInstances) allNames.add(v.name || v.instanceName);
       for (const d of dbSessions || []) if (d.instance_name) allNames.add(d.instance_name);
@@ -338,14 +344,12 @@ serve(async (req) => {
           recommendations: [],
         };
 
-        // Count statuses
         const status = db?.status || (vps?.connectionStatus === "open" ? "connected" : "disconnected");
         if (status === "connected") result.summary.connected++;
         else if (status === "connecting") result.summary.connecting++;
         else if (status === "error") result.summary.error++;
         else result.summary.disconnected++;
 
-        // Check webhook
         if (result.evolution_reachable && vps) {
           try {
             const whRes = await fetch(`${baseUrl}/webhook/find/${encodeURIComponent(name)}`, {
@@ -373,7 +377,6 @@ serve(async (req) => {
           }
         }
 
-        // Heartbeat check
         if (db?.last_webhook_event_at) {
           const age = Date.now() - new Date(db.last_webhook_event_at).getTime();
           if (age > 5 * 60 * 1000) {
@@ -383,7 +386,6 @@ serve(async (req) => {
           detail.recommendations.push("Belum pernah menerima event webhook.");
         }
 
-        // Status-specific recommendations
         if (!vps && db) {
           detail.recommendations.push("Instance ada di database tapi tidak di VPS. Buat ulang atau hapus.");
         }
@@ -397,7 +399,6 @@ serve(async (req) => {
         result.instance_details.push(detail);
       }
 
-      // Global recommendations
       if (!result.evolution_reachable) {
         result.recommendations.push("KRITIS: Evolution API tidak bisa diakses.");
       }
@@ -413,12 +414,11 @@ serve(async (req) => {
       );
     }
 
-    // --- TEST-ALL: one-click comprehensive test ---
+    // --- TEST-ALL ---
     if (action === "test-all") {
       const steps: any[] = [];
       let overallStatus = "ok";
 
-      // Step 1: Evolution reachable
       const step1Start = Date.now();
       try {
         const res = await fetch(`${baseUrl}/instance/fetchInstances`, {
@@ -439,7 +439,6 @@ serve(async (req) => {
         overallStatus = "error";
       }
 
-      // Step 2: DB sessions check
       const { data: sessions } = await supabaseAdmin.from("wa_sessions").select("instance_name, status, last_webhook_event_at, last_error");
       const connected = (sessions || []).filter(s => s.status === "connected").length;
       const disconnected = (sessions || []).filter(s => s.status === "disconnected").length;
@@ -452,7 +451,6 @@ serve(async (req) => {
       });
       if (disconnected > 0 || errCount > 0) overallStatus = overallStatus === "error" ? "error" : "warn";
 
-      // Step 3: Webhook heartbeat
       const now = Date.now();
       const staleInstances: string[] = [];
       for (const s of sessions || []) {
@@ -471,11 +469,9 @@ serve(async (req) => {
           : `${staleInstances.length} instance tidak ada event terbaru: ${staleInstances.join(", ")}`,
       });
 
-      // Step 4: Inbound webhook verification (VPS → Dashboard)
       const pingId = `ping_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
       const webhookEndpoint = `${SUPABASE_URL}/functions/v1/wa-webhook`;
-      const WA_WEBHOOK_SECRET = Deno.env.get("WA_WEBHOOK_SECRET") || "";
       
       let inboundOk = false;
       let inboundDetail = "";
@@ -485,7 +481,7 @@ serve(async (req) => {
           method: "POST",
           headers: { 
             "Content-Type": "application/json",
-            "X-Webhook-Secret": WA_WEBHOOK_SECRET,
+            "X-Webhook-Secret": cfg.wa_webhook_secret,
           },
           body: JSON.stringify({
             event: "diagnostic.ping",
@@ -496,8 +492,7 @@ serve(async (req) => {
         const inboundLatency = Date.now() - inboundStart;
         
         if (pingRes.ok) {
-          // Verify it was written to wa_ops_logs
-          await new Promise(r => setTimeout(r, 500)); // brief wait for DB write
+          await new Promise(r => setTimeout(r, 500));
           const { data: pingLog } = await supabaseAdmin
             .from("wa_ops_logs")
             .select("id")
@@ -527,7 +522,6 @@ serve(async (req) => {
       });
       if (!inboundOk) overallStatus = overallStatus === "error" ? "error" : "warn";
 
-      // Step 5: Recent ops logs
       const { data: recentLogs } = await supabaseAdmin
         .from("wa_ops_logs")
         .select("action, status, error_message, created_at")
@@ -687,7 +681,6 @@ serve(async (req) => {
           .eq("instance_name", instance_name);
         await logOp(supabaseAdmin, instance_name, "connect", "ok", opStart, undefined, { has_qr: true });
       } else {
-        // Check connection state
         try {
           const stateRes = await fetch(`${baseUrl}/instance/connectionState/${encodeURIComponent(instance_name)}`, {
             method: "GET",
@@ -916,9 +909,10 @@ serve(async (req) => {
       );
     }
 
-    return new Response(JSON.stringify({ error: "Unknown action" }), {
-      status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({ error: `Unknown action: ${action}` }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
   } catch (e) {
     console.error("manage-wa-instance error:", e);
     return new Response(

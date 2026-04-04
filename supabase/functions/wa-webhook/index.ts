@@ -7,6 +7,36 @@ const corsHeaders = {
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
+/**
+ * Dynamic Config Engine: reads from platform_settings first, fallback to env.
+ * Single source of truth for all API connections.
+ */
+async function getConfig(supabase: any): Promise<Record<string, string>> {
+  const { data } = await supabase.from("platform_settings").select("key, value");
+  const db: Record<string, string> = {};
+  for (const row of data || []) db[row.key] = row.value;
+  return {
+    evolution_api_url: db.evolution_api_url || Deno.env.get("EVOLUTION_API_URL") || "",
+    evolution_api_key: db.evolution_api_key || Deno.env.get("EVOLUTION_API_KEY") || "",
+    wa_webhook_secret: db.wa_webhook_secret || Deno.env.get("WA_WEBHOOK_SECRET") || "",
+    // AI config (already was read from DB)
+    ai_system_prompt: db.ai_system_prompt || "",
+    ai_model: db.ai_model || "",
+    ai_temperature: db.ai_temperature || "0.3",
+    ai_max_tokens: db.ai_max_tokens || "1024",
+    history_length: db.history_length || "10",
+    history_char_limit: db.history_char_limit || "3000",
+    rag_result_count: db.rag_result_count || "3",
+    sector_detection: db.sector_detection || "true",
+    no_rag_action: db.no_rag_action || "escalate",
+    no_rag_message: db.no_rag_message || "",
+    escalation_keyword: db.escalation_keyword || "ESKALASI_HUMAN",
+    escalation_message: db.escalation_message || "",
+    anti_ban_delay_min: db.anti_ban_delay_min || "2",
+    anti_ban_delay_max: db.anti_ban_delay_max || "4",
+  };
+}
+
 function detectSector(message: string): string | null {
   const lower = message.toLowerCase();
 
@@ -88,15 +118,16 @@ function trimHistoryByCharLimit(messages: any[], maxChars: number = 3000): any[]
   return trimmed;
 }
 
-async function downloadMediaBase64(messageData: any, instanceName: string): Promise<string | null> {
+// Config-aware: receives API URL/key from dynamic config
+async function downloadMediaBase64(messageData: any, instanceName: string, cfg: Record<string, string>): Promise<string | null> {
   try {
-    const EVOLUTION_API_URL = Deno.env.get("EVOLUTION_API_URL")!;
-    const EVOLUTION_API_KEY = Deno.env.get("EVOLUTION_API_KEY")!;
-    const baseUrl = EVOLUTION_API_URL.replace(/\/$/, "");
+    const baseUrl = cfg.evolution_api_url.replace(/\/$/, "");
+    const apiKey = cfg.evolution_api_key;
+    if (!baseUrl || !apiKey) return null;
 
     const res = await fetch(`${baseUrl}/chat/getBase64FromMediaMessage/${instanceName}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
+      headers: { "Content-Type": "application/json", apikey: apiKey },
       body: JSON.stringify({ message: messageData }),
     });
 
@@ -150,14 +181,9 @@ async function uploadMediaToStorage(
   }
 }
 
-/**
- * Normalize event name to handle Evolution API variations.
- * Supports: qrcode.updated, QRCODE_UPDATED, qr, qr.updated, etc.
- */
 function normalizeEventName(event: string | undefined): string {
   if (!event) return "";
   const lower = event.toLowerCase().replace(/_/g, ".");
-  // Map aliases
   if (lower === "diagnostic.ping") return "diagnostic.ping";
   if (lower.includes("qrcode") || lower === "qr" || lower === "qr.updated") return "qrcode.updated";
   if (lower.includes("connection")) return "connection.update";
@@ -165,12 +191,8 @@ function normalizeEventName(event: string | undefined): string {
   return lower;
 }
 
-/**
- * Extract QR code from various webhook payload formats.
- */
 function extractQrFromWebhook(body: any): string | null {
   const data = body.data || body;
-  // Direct fields
   if (typeof data === "string" && data.length > 20) return data;
   if (data?.base64) return data.base64;
   if (data?.code) return data.code;
@@ -178,7 +200,6 @@ function extractQrFromWebhook(body: any): string | null {
   if (data?.qrcode?.code) return data.qrcode.code;
   if (data?.qrcode && typeof data.qrcode === "string") return data.qrcode;
   if (data?.pairingCode) return data.pairingCode;
-  // body-level fallbacks
   if (body.qrcode?.base64) return body.qrcode.base64;
   if (body.qrcode?.code) return body.qrcode.code;
   if (body.base64) return body.base64;
@@ -186,9 +207,6 @@ function extractQrFromWebhook(body: any): string | null {
   return null;
 }
 
-/**
- * Map Evolution connection state to our status enum.
- */
 function mapConnectionState(state: string | undefined): "connected" | "connecting" | "disconnected" | "error" {
   if (!state) return "disconnected";
   const lower = state.toLowerCase();
@@ -210,29 +228,32 @@ serve(async (req) => {
   }
 
   try {
-    // Verify webhook secret
-    const WA_WEBHOOK_SECRET = Deno.env.get("WA_WEBHOOK_SECRET");
+    const body = await req.json();
+    const rawEvent = body.event || body.type;
+    const event = normalizeEventName(rawEvent);
+    const instanceName = body.instance || body.instanceName;
+
+    // Create admin client early so we can read dynamic config
+    const supabaseAdmin = createClient(
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+    );
+
+    // === Dynamic Config: DB first, env fallback ===
+    const cfg = await getConfig(supabaseAdmin);
+
+    // Verify webhook secret using dynamic config
     const receivedSecret = req.headers.get("X-Webhook-Secret") || 
       new URL(req.url).searchParams.get("secret");
     
-    if (WA_WEBHOOK_SECRET && receivedSecret !== WA_WEBHOOK_SECRET) {
+    if (cfg.wa_webhook_secret && receivedSecret !== cfg.wa_webhook_secret) {
       return new Response(JSON.stringify({ error: "Invalid webhook secret" }), {
         status: 403,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const body = await req.json();
-    const rawEvent = body.event || body.type;
-    const event = normalizeEventName(rawEvent);
-    const instanceName = body.instance || body.instanceName;
-
-    const supabaseAdmin = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
-
-    // === Handle DIAGNOSTIC PING (bidirectional test) ===
+    // === Handle DIAGNOSTIC PING ===
     if (event === "diagnostic.ping") {
       const pingId = body.data?.ping_id || body.ping_id;
       console.log("Diagnostic ping received:", pingId);
@@ -247,7 +268,7 @@ serve(async (req) => {
       });
     }
 
-    // === Update heartbeat for ANY event from this instance ===
+    // === Update heartbeat ===
     if (instanceName) {
       await supabaseAdmin
         .from("wa_sessions")
@@ -277,7 +298,6 @@ serve(async (req) => {
           .eq("instance_name", instanceName);
       }
 
-      // Log to ops
       await supabaseAdmin.from("wa_ops_logs").insert({
         instance_name: instanceName,
         action: "connection.update",
@@ -307,7 +327,6 @@ serve(async (req) => {
             .eq("instance_name", instanceName);
         } else {
           console.warn("QR event received but no QR data found. Payload keys:", Object.keys(body.data || body));
-          // Log the empty QR event for debugging
           await supabaseAdmin.from("wa_ops_logs").insert({
             instance_name: instanceName,
             action: "qrcode.updated",
@@ -323,9 +342,8 @@ serve(async (req) => {
       });
     }
 
-    // === Only process messages.upsert from here ===
+    // === Only process messages.upsert ===
     if (event !== "messages.upsert") {
-      // Log unknown events for debugging
       if (rawEvent) {
         console.log("Unhandled event:", rawEvent, "normalized:", event, "instance:", instanceName);
         await supabaseAdmin.from("wa_ops_logs").insert({
@@ -423,14 +441,6 @@ serve(async (req) => {
     const businessName = clientData?.name || "Bisnis Kami";
     const dailyLimit = clientData?.daily_message_limit || 300;
 
-    const { data: platformSettings } = await supabaseAdmin
-      .from("platform_settings")
-      .select("key, value");
-    const cfg: Record<string, string> = {};
-    for (const row of platformSettings || []) {
-      cfg[row.key] = row.value;
-    }
-
     const today = new Date().toISOString().split("T")[0];
     const { data: todayLog } = await supabaseAdmin
       .from("message_logs")
@@ -488,13 +498,13 @@ serve(async (req) => {
       conversation = newConvo;
     }
 
-    // 5. Handle media
+    // 5. Handle media (config-aware)
     let mediaUrl: string | null = null;
     let mediaType: string | null = null;
 
     if (hasImage) {
       mediaType = "image";
-      const base64 = await downloadMediaBase64(messageData, instanceName);
+      const base64 = await downloadMediaBase64(messageData, instanceName, cfg);
       if (base64) {
         mediaUrl = await uploadMediaToStorage(supabaseAdmin, base64, conversation!.id, "image");
       }
@@ -523,13 +533,13 @@ serve(async (req) => {
       );
     }
 
-    // === AI HANDLING ===
-    const historyLength = parseInt(cfg.history_length || "10");
-    const charLimit = parseInt(cfg.history_char_limit || "3000");
-    const ragLimit = parseInt(cfg.rag_result_count || "3");
+    // === AI HANDLING (all config from dynamic cfg) ===
+    const historyLength = parseInt(cfg.history_length);
+    const charLimit = parseInt(cfg.history_char_limit);
+    const ragLimit = parseInt(cfg.rag_result_count);
     const useSectorDetection = cfg.sector_detection !== "false";
-    const noRagAction = cfg.no_rag_action || "escalate";
-    const escalationKeyword = cfg.escalation_keyword || "ESKALASI_HUMAN";
+    const noRagAction = cfg.no_rag_action;
+    const escalationKeyword = cfg.escalation_keyword;
 
     const { data: chatHistory } = await supabaseAdmin
       .from("wa_messages")
@@ -581,7 +591,7 @@ serve(async (req) => {
         console.log("No RAG context found, answering without context (configured)");
       } else if (noRagAction === "custom_message") {
         const customMsg = (cfg.no_rag_message || "Maaf, saya belum bisa menjawab pertanyaan ini.").replace(/^"|"$/g, "");
-        await sendWhatsAppMessage(phoneNumber, customMsg, instanceName);
+        await sendWhatsAppMessage(phoneNumber, customMsg, instanceName, cfg);
         await supabaseAdmin.from("wa_messages").insert({
           conversation_id: conversation!.id,
           sender: "AI",
@@ -618,8 +628,8 @@ serve(async (req) => {
       + `\n\nNama bisnis: ${businessName}\n\nINFORMASI:\n${context}`;
 
     const aiModel = cfg.ai_model ? cfg.ai_model.replace(/^"|"$/g, "") : "google/gemini-2.5-flash-lite";
-    const aiTemperature = parseFloat(cfg.ai_temperature || "0.3");
-    const aiMaxTokens = parseInt(cfg.ai_max_tokens || "1024");
+    const aiTemperature = parseFloat(cfg.ai_temperature);
+    const aiMaxTokens = parseInt(cfg.ai_max_tokens);
 
     const aiResponse = await fetch(
       "https://ai.gateway.lovable.dev/v1/chat/completions",
@@ -691,7 +701,7 @@ serve(async (req) => {
       );
     }
 
-    await sendWhatsAppMessage(phoneNumber, answer, instanceName);
+    await sendWhatsAppMessage(phoneNumber, answer, instanceName, cfg);
 
     await supabaseAdmin.from("wa_messages").insert({
       conversation_id: conversation!.id,
@@ -712,19 +722,23 @@ serve(async (req) => {
   }
 });
 
-async function sendWhatsAppMessage(phoneNumber: string, message: string, instanceName: string) {
-  const EVOLUTION_API_URL = Deno.env.get("EVOLUTION_API_URL")!;
-  const EVOLUTION_API_KEY = Deno.env.get("EVOLUTION_API_KEY")!;
-  const baseUrl = EVOLUTION_API_URL.replace(/\/$/, "");
+// Config-aware: receives API URL/key + delay settings from dynamic config
+async function sendWhatsAppMessage(phoneNumber: string, message: string, instanceName: string, cfg: Record<string, string>) {
+  const baseUrl = cfg.evolution_api_url.replace(/\/$/, "");
+  const apiKey = cfg.evolution_api_key;
+  if (!baseUrl || !apiKey) {
+    console.error("Evolution API not configured in dynamic config");
+    return;
+  }
   const normalizedPhone = phoneNumber.replace(/\D/g, "");
 
-  const delayMin = 2000;
-  const delayMax = 4000;
+  const delayMin = parseFloat(cfg.anti_ban_delay_min || "2") * 1000;
+  const delayMax = parseFloat(cfg.anti_ban_delay_max || "4") * 1000;
 
   try {
     await fetch(`${baseUrl}/chat/presence/${instanceName}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
+      headers: { "Content-Type": "application/json", apikey: apiKey },
       body: JSON.stringify({ number: normalizedPhone, presence: "composing" }),
     });
   } catch (e) {
@@ -735,7 +749,7 @@ async function sendWhatsAppMessage(phoneNumber: string, message: string, instanc
 
   const res = await fetch(`${baseUrl}/message/sendText/${instanceName}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", apikey: EVOLUTION_API_KEY },
+    headers: { "Content-Type": "application/json", apikey: apiKey },
     body: JSON.stringify({ number: normalizedPhone, text: message }),
   });
 
@@ -750,7 +764,7 @@ async function escalateToHuman(
   conversationId: string,
   phoneNumber: string,
   instanceName: string,
-  cfg: Record<string, string> = {}
+  cfg: Record<string, string>
 ) {
   await supabase
     .from("wa_conversations")
@@ -758,7 +772,7 @@ async function escalateToHuman(
     .eq("id", conversationId);
 
   const escalationMsg = (cfg.escalation_message || "Mohon tunggu kak, saya sedang menyambungkan dengan Admin kami. 🙏").replace(/^"|"$/g, "");
-  await sendWhatsAppMessage(phoneNumber, escalationMsg, instanceName);
+  await sendWhatsAppMessage(phoneNumber, escalationMsg, instanceName, cfg);
 
   await supabase.from("wa_messages").insert({
     conversation_id: conversationId,
