@@ -54,28 +54,50 @@ serve(async (req) => {
     }
 
     if (req.method === "POST") {
-      // Test Evolution API connection
+      // Enhanced test-evolution with diagnostics
       if (action === "test-evolution") {
         const { api_url, api_key } = await req.json();
         if (!api_url || !api_key) throw new Error("api_url and api_key required");
 
+        const diagnostics: any = {
+          success: false,
+          instances: 0,
+          latency_ms: 0,
+          auth_valid: false,
+          reachable: false,
+          error_detail: null,
+          http_status: null,
+        };
+
+        const baseUrl = api_url.replace(/\/$/, "");
+        const startTime = Date.now();
+
         try {
-          const baseUrl = api_url.replace(/\/$/, "");
           const res = await fetch(`${baseUrl}/instance/fetchInstances`, {
             headers: { apikey: api_key },
           });
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const data = await res.json();
-          return new Response(
-            JSON.stringify({ success: true, instances: Array.isArray(data) ? data.length : 0 }),
-            { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-          );
+          diagnostics.latency_ms = Date.now() - startTime;
+          diagnostics.http_status = res.status;
+          diagnostics.reachable = true;
+
+          if (res.ok) {
+            const data = await res.json();
+            diagnostics.success = true;
+            diagnostics.auth_valid = true;
+            diagnostics.instances = Array.isArray(data) ? data.length : 0;
+          } else {
+            const errText = await res.text();
+            diagnostics.auth_valid = res.status !== 401 && res.status !== 403;
+            diagnostics.error_detail = `HTTP ${res.status}: ${errText.substring(0, 200)}`;
+          }
         } catch (err) {
-          return new Response(
-            JSON.stringify({ success: false, error: err instanceof Error ? err.message : "Connection failed" }),
-            { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-          );
+          diagnostics.latency_ms = Date.now() - startTime;
+          diagnostics.error_detail = err instanceof Error ? err.message : "Connection failed";
         }
+
+        return new Response(JSON.stringify(diagnostics), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
 
       // Upsert settings
