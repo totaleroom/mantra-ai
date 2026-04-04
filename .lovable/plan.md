@@ -1,87 +1,99 @@
 
 
-# Plan: Integrasi wa-bridge-lite sebagai Provider WhatsApp
+# Plan: Zero-Hardcode Architecture — Dynamic Config Engine
 
-## Situasi Saat Ini
-- Semua edge function (`wa-webhook`, `manage-wa-instance`, `wa-send-message`) hardcoded ke Evolution API
-- VPS sekarang menjalankan wa-bridge-lite di `http://43.157.223.29:3020` dengan token auth
-- wa-bridge-lite sudah dikonfigurasi mengirim webhook ke endpoint `wa-webhook` kita
-- API wa-bridge-lite berbeda dari Evolution: `/qr`, `/status`, `/send`, `/sessions` dll, auth via `?token=`
+## Masalah Inti
 
-## Arsitektur Baru
+Edge functions (`wa-webhook`, `wa-send-message`, `manage-wa-instance`) membaca config dari **Deno env secrets** (`EVOLUTION_API_URL`, `EVOLUTION_API_KEY`), tapi Settings UI menyimpan ke tabel **`platform_settings`**. Akibatnya, mengubah URL/key di dashboard **tidak berpengaruh** — edge functions tetap pakai nilai lama dari secrets.
 
 ```text
-Dashboard → manage-wa-instance → deteksi provider → Evolution API / wa-bridge-lite
-wa-bridge-lite → wa-webhook → deteksi format → proses pesan → wa-send-message → kirim via provider yg sesuai
+SEKARANG (broken):
+  Settings UI → platform_settings (DB)     ← dashboard baca dari sini
+  Edge Functions → Deno.env.get("SECRET")  ← runtime baca dari sini (berbeda!)
+
+TARGET:
+  Settings UI → platform_settings (DB) ← SATU sumber kebenaran
+  Edge Functions → baca dari platform_settings dulu, fallback ke env
+  Dashboard → baca dari platform_settings
 ```
 
-## Perubahan Database
+## Perubahan
 
-**Migration**: Tambah kolom `provider` di `wa_sessions`
-```sql
-ALTER TABLE public.wa_sessions 
-  ADD COLUMN IF NOT EXISTS provider text NOT NULL DEFAULT 'wwebjs';
+### 1. Helper Function: `getConfig()` untuk Edge Functions
+
+Buat helper yang di-copy ke setiap edge function yang butuh config. Logic:
+1. Query `platform_settings` untuk key yang dibutuhkan
+2. Jika ada di DB, pakai nilai DB
+3. Jika tidak ada, fallback ke `Deno.env.get()`
+
+```typescript
+async function getConfig(supabase: any): Promise<Record<string, string>> {
+  const { data } = await supabase.from("platform_settings").select("key, value");
+  const config: Record<string, string> = {};
+  for (const row of data || []) config[row.key] = row.value;
+  return {
+    evolution_api_url: config.evolution_api_url || Deno.env.get("EVOLUTION_API_URL") || "",
+    evolution_api_key: config.evolution_api_key || Deno.env.get("EVOLUTION_API_KEY") || "",
+    wa_webhook_secret: config.wa_webhook_secret || Deno.env.get("WA_WEBHOOK_SECRET") || "",
+    // ... semua config lain
+  };
+}
 ```
-Default `wwebjs` karena VPS sekarang pakai wa-bridge-lite.
 
-## Perubahan Secrets
+### 2. Update Edge Functions (3 file)
 
-Tambah 2 secret baru:
-- `WWEBJS_API_URL` = `http://43.157.223.29:3020`
-- `WWEBJS_API_KEY` = `1d8c8e708909e486c01f204100e64777`
+| File | Perubahan |
+|------|-----------|
+| `supabase/functions/wa-webhook/index.ts` | Ganti semua `Deno.env.get("EVOLUTION_API_URL/KEY")` dengan `getConfig()` result. Config di-fetch 1x per request, di-pass ke helper functions. |
+| `supabase/functions/wa-send-message/index.ts` | Sama — baca URL/key dari DB via `getConfig()` |
+| `supabase/functions/manage-wa-instance/index.ts` | Sama — baca URL/key dari DB via `getConfig()` |
 
-## Perubahan Edge Functions
+### 3. Enhanced Settings UI — Tab "WhatsApp API"
 
-### 1. `supabase/functions/wa-webhook/index.ts`
-- **`normalizeEventName()`**: Tambah mapping untuk format event wa-bridge-lite (kemungkinan `message`, `session.status`, `qr` dll vs Evolution `MESSAGES_UPSERT`, `CONNECTION_UPDATE`, `QRCODE_UPDATED`)
-- **`extractQrFromWebhook()`**: Tambah parsing format QR dari wa-bridge-lite
-- **`mapConnectionState()`**: Tambah state `CONNECTED`/`DISCONNECTED` dari wa-bridge-lite
-- **Message parsing (line 350+)**: Deteksi format pesan wa-bridge-lite vs Evolution (field names berbeda: `remoteJid` vs `from`, `message.conversation` vs `body`, dll)
-- **`sendWhatsAppMessage()`**: Lookup provider dari `wa_sessions`, route ke Evolution atau wa-bridge-lite API
-- **`downloadMediaBase64()`**: Tambah path untuk wa-bridge-lite media download
+Tambahkan di `src/pages/admin/Settings.tsx`:
 
-### 2. `supabase/functions/manage-wa-instance/index.ts`
-- **Provider detection**: Baca `provider` dari `wa_sessions` atau default dari config
-- **Create**: Untuk wwebjs, panggil `POST /sessions` (wa-bridge-lite) bukan Evolution `instance/create`
-- **Connect (fetch QR)**: Untuk wwebjs, panggil `GET /qr?session={name}&token={key}`
-- **Status**: Panggil `GET /status?session={name}&token={key}`
-- **Restart/Logout/Delete**: Map ke endpoint wa-bridge-lite yang sesuai
-- **Health-check/Diagnostics/Test-all**: Cek wa-bridge-lite reachability selain/alih Evolution
-- **Sync**: List sessions dari wa-bridge-lite
+- **Live Diagnostics panel** setelah "Test Connection":
+  - Tampilkan latency (ms), HTTP status, CORS status
+  - Raw error response (sanitized) untuk debugging
+  - Auto-retry indicator jika request pertama gagal
 
-### 3. `supabase/functions/wa-send-message/index.ts`
-- Lookup provider dari `wa_sessions` berdasarkan `instance_name`
-- Jika `wwebjs`: kirim via `POST http://.../send?session={name}&token={key}` dengan body `{ to, text }`
-- Jika `evolution`: kirim via Evolution API (existing)
+- **Connection status badge** yang real-time:
+  - Hijau: connected + latency < 500ms
+  - Kuning: connected tapi latency > 500ms
+  - Merah: unreachable
 
-### 4. `supabase/functions/manage-settings/index.ts`
-- Tambah field untuk wa-bridge-lite URL & token di Settings (selain Evolution API URL & key)
+- Update test handler untuk mengembalikan data diagnostik yang lebih kaya (latency, headers, error detail)
 
-## Perubahan Frontend
+### 4. Update `manage-settings` Edge Function
 
-### `src/pages/admin/Settings.tsx`
-- Tambah field input di tab WhatsApp API:
-  - Provider default (dropdown: Evolution / wa-bridge-lite)
-  - wa-bridge-lite URL
-  - wa-bridge-lite Token
+Tambah action `test-evolution` response yang lebih kaya:
+- `latency_ms`: waktu respons
+- `cors_ok`: boolean (apakah bisa di-fetch dari edge function)
+- `auth_valid`: boolean
+- `error_detail`: pesan error spesifik
 
-### `src/pages/admin/DeviceManager.tsx`
-- Saat create instance, pilih provider
-- Tampilkan provider badge di InstanceCard
-- QR untuk wwebjs: tampilkan link langsung ke `/qr?session=...&token=...` atau embed
+### 5. Settings Save → Invalidate Semua Query
 
-### `src/components/admin/InstanceCard.tsx`
-- Tampilkan badge provider (Evolution / WA Bridge Lite)
+Di frontend, setelah save settings berhasil, invalidate semua React Query cache agar semua komponen (Dashboard, Device Manager, dll) langsung fetch ulang dengan config baru.
 
-## Prioritas Implementasi
-1. Migration + secrets (fondasi)
-2. `wa-webhook` (terima event dari wa-bridge-lite)
-3. `manage-wa-instance` (create/connect/QR via wa-bridge-lite)
-4. `wa-send-message` (kirim pesan via wa-bridge-lite)
-5. Frontend Settings & DeviceManager update
+## File Terdampak
+
+| File | Aksi |
+|------|------|
+| `supabase/functions/wa-webhook/index.ts` | Tambah `getConfig()`, ganti env reads |
+| `supabase/functions/wa-send-message/index.ts` | Tambah `getConfig()`, ganti env reads |
+| `supabase/functions/manage-wa-instance/index.ts` | Tambah `getConfig()`, ganti env reads |
+| `supabase/functions/manage-settings/index.ts` | Perkaya response `test-evolution` |
+| `src/pages/admin/Settings.tsx` | Tambah Live Diagnostics panel, invalidate all queries on save |
 
 ## Yang TIDAK Diubah
-- Logika AI (RAG, prompts, escalation) tetap sama
-- Tabel lain (clients, documents, wa_customers, wa_conversations, wa_messages)
+- Database schema (sudah punya `platform_settings`)
+- Auth flow
 - Landing page
+- Secrets yang sudah ada (tetap jadi fallback)
+
+## Catatan Arsitektur
+- `platform_settings` sudah dilindungi RLS (admin only)
+- Edge functions pakai service role key untuk query `platform_settings`, jadi aman
+- Fallback ke env secrets memastikan backward compatibility — jika DB kosong, sistem tetap jalan
 
