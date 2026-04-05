@@ -9,34 +9,44 @@ const corsHeaders = {
 
 /**
  * Dynamic Config Engine: reads from platform_settings first, fallback to env.
+ * Supports multi-provider: evolution, wwebjs, n8n/custom.
  */
 async function getConfig(supabase: any): Promise<Record<string, string>> {
   const { data } = await supabase.from("platform_settings").select("key, value");
   const db: Record<string, string> = {};
   for (const row of data || []) db[row.key] = row.value;
   return {
+    wa_provider: db.wa_provider || "evolution",
     evolution_api_url: db.evolution_api_url || Deno.env.get("EVOLUTION_API_URL") || "",
     evolution_api_key: db.evolution_api_key || Deno.env.get("EVOLUTION_API_KEY") || "",
+    wwebjs_api_url: db.wwebjs_api_url || Deno.env.get("WWEBJS_API_URL") || "",
+    wwebjs_api_key: db.wwebjs_api_key || Deno.env.get("WWEBJS_API_KEY") || "",
+    n8n_webhook_url: db.n8n_webhook_url || "",
+    custom_send_url: db.custom_send_url || "",
+    custom_auth_header: db.custom_auth_header || "",
     wa_webhook_secret: db.wa_webhook_secret || Deno.env.get("WA_WEBHOOK_SECRET") || "",
     anti_ban_delay_min: db.anti_ban_delay_min || "2",
     anti_ban_delay_max: db.anti_ban_delay_max || "4",
   };
 }
 
+/** Get provider API details based on provider type */
+function getProviderApi(cfg: Record<string, string>, provider?: string) {
+  const p = provider || cfg.wa_provider || "evolution";
+  if (p === "wwebjs") return { url: cfg.wwebjs_api_url, key: cfg.wwebjs_api_key, type: "wwebjs" };
+  if (p === "n8n" || p === "custom") return { url: cfg.custom_send_url || cfg.n8n_webhook_url, key: cfg.custom_auth_header, type: "custom" };
+  return { url: cfg.evolution_api_url, key: cfg.evolution_api_key, type: "evolution" };
+}
+
 /**
- * wa-send-message: Send a WhatsApp message via Evolution API
- * 
- * Body: { instance_name, phone_number, message, conversation_id?, sender? }
- * 
- * Now uses Dynamic Config Engine — reads API URL/key from platform_settings,
- * falls back to env secrets.
+ * wa-send-message: Send a WhatsApp message via the configured provider
+ * Supports Evolution API, wa-bridge-lite (WWeb.js), and custom/n8n providers.
  */
 serve(async (req) => {
   if (req.method === "OPTIONS")
     return new Response(null, { headers: corsHeaders });
 
   try {
-    // Auth: accept either Bearer token (admin dashboard) or webhook secret (internal call)
     const authHeader = req.headers.get("Authorization");
     const webhookSecret = req.headers.get("X-Webhook-Secret");
 
@@ -45,12 +55,7 @@ serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
     );
 
-    // Load dynamic config
     const cfg = await getConfig(supabaseAdmin);
-
-    if (!cfg.evolution_api_url || !cfg.evolution_api_key) {
-      throw new Error("Evolution API not configured. Set evolution_api_url and evolution_api_key in Settings or as secrets.");
-    }
 
     let isAuthenticated = false;
 
@@ -62,12 +67,8 @@ serve(async (req) => {
         Deno.env.get("SUPABASE_ANON_KEY")!,
         { global: { headers: { Authorization: authHeader } } }
       );
-      const token = authHeader.replace("Bearer ", "");
-      const { data: claimsData, error: claimsError } = await supabaseAuth.auth.getClaims(token);
-      if (!claimsError && claimsData?.claims) {
-        const { data: isAdmin } = await supabaseAuth.rpc("is_admin");
-        if (isAdmin) isAuthenticated = true;
-      }
+      const { data: isAdmin } = await supabaseAuth.rpc("is_admin");
+      if (isAdmin) isAuthenticated = true;
     }
 
     if (!isAuthenticated) {
@@ -77,60 +78,103 @@ serve(async (req) => {
       });
     }
 
-    const { instance_name, phone_number, message, conversation_id, sender } = await req.json();
+    const { instance_name, phone_number, message, conversation_id, sender, provider: reqProvider } = await req.json();
     if (!instance_name || !phone_number || !message) {
       throw new Error("instance_name, phone_number, and message are required");
     }
 
-    const normalizedPhone = phone_number.replace(/\D/g, "");
-    const baseUrl = cfg.evolution_api_url.replace(/\/$/, "");
-    const apiKey = cfg.evolution_api_key;
-
-    // 1. Send typing indicator (composing)
-    try {
-      await fetch(`${baseUrl}/chat/presence/${instance_name}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          apikey: apiKey,
-        },
-        body: JSON.stringify({
-          number: normalizedPhone,
-          presence: "composing",
-        }),
-      });
-    } catch (e) {
-      console.warn("Typing indicator failed (non-critical):", e);
+    // Determine provider: from request, or from session, or from config
+    let provider = reqProvider || cfg.wa_provider;
+    if (!reqProvider) {
+      const { data: sessionData } = await supabaseAdmin
+        .from("wa_sessions")
+        .select("provider")
+        .eq("instance_name", instance_name)
+        .maybeSingle();
+      if (sessionData?.provider) provider = sessionData.provider;
     }
 
-    // 2. Anti-ban delay from dynamic config
+    const api = getProviderApi(cfg, provider);
+    if (!api.url) {
+      throw new Error(`Provider ${provider} not configured. Set URL in Settings.`);
+    }
+
+    const normalizedPhone = phone_number.replace(/\D/g, "");
+    const baseUrl = api.url.replace(/\/$/, "");
+
+    // Anti-ban delay
     const delayMin = parseFloat(cfg.anti_ban_delay_min) * 1000;
     const delayMax = parseFloat(cfg.anti_ban_delay_max) * 1000;
     const delay = delayMin + Math.random() * (delayMax - delayMin);
-    await new Promise((resolve) => setTimeout(resolve, delay));
 
-    // 3. Send message
-    const sendRes = await fetch(`${baseUrl}/message/sendText/${instance_name}`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        apikey: apiKey,
-      },
-      body: JSON.stringify({
-        number: normalizedPhone,
-        text: message,
-      }),
-    });
+    // Send based on provider
+    let sendData: any;
 
-    if (!sendRes.ok) {
-      const errText = await sendRes.text();
-      console.error("Evolution API send error:", sendRes.status, errText);
-      throw new Error(`Failed to send message: ${sendRes.status}`);
+    if (api.type === "evolution") {
+      // 1. Typing indicator
+      try {
+        await fetch(`${baseUrl}/chat/presence/${instance_name}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", apikey: api.key },
+          body: JSON.stringify({ number: normalizedPhone, presence: "composing" }),
+        });
+      } catch (e) {
+        console.warn("Typing indicator failed (non-critical):", e);
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, delay));
+
+      const sendRes = await fetch(`${baseUrl}/message/sendText/${instance_name}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: api.key },
+        body: JSON.stringify({ number: normalizedPhone, text: message }),
+      });
+
+      if (!sendRes.ok) {
+        const errText = await sendRes.text();
+        console.error("Evolution API send error:", sendRes.status, errText);
+        throw new Error(`Failed to send message: ${sendRes.status}`);
+      }
+      sendData = await sendRes.json();
+
+    } else if (api.type === "wwebjs") {
+      await new Promise((resolve) => setTimeout(resolve, delay));
+
+      const sendRes = await fetch(`${baseUrl}/send?session=${encodeURIComponent(instance_name)}&token=${encodeURIComponent(api.key)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: normalizedPhone, text: message }),
+      });
+
+      if (!sendRes.ok) {
+        const errText = await sendRes.text();
+        console.error("WWebJS send error:", sendRes.status, errText);
+        throw new Error(`Failed to send message via WWebJS: ${sendRes.status}`);
+      }
+      sendData = await sendRes.json();
+
+    } else {
+      // Custom/n8n provider
+      await new Promise((resolve) => setTimeout(resolve, delay));
+
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (api.key) headers["Authorization"] = api.key;
+
+      const sendRes = await fetch(baseUrl, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ to: normalizedPhone, message, instance_name }),
+      });
+
+      if (!sendRes.ok) {
+        const errText = await sendRes.text();
+        console.error("Custom provider send error:", sendRes.status, errText);
+        throw new Error(`Failed to send message via custom provider: ${sendRes.status}`);
+      }
+      sendData = await sendRes.json();
     }
 
-    const sendData = await sendRes.json();
-
-    // 4. Log message to wa_messages if conversation_id provided
+    // Log message to wa_messages if conversation_id provided
     if (conversation_id && sender) {
       await supabaseAdmin.from("wa_messages").insert({
         conversation_id,

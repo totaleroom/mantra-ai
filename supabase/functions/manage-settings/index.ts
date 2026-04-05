@@ -54,10 +54,10 @@ serve(async (req) => {
     }
 
     if (req.method === "POST") {
-      // Enhanced test-evolution with diagnostics
-      if (action === "test-evolution") {
-        const { api_url, api_key } = await req.json();
-        if (!api_url || !api_key) throw new Error("api_url and api_key required");
+      // Provider-aware test (supports evolution, wwebjs, custom)
+      if (action === "test-provider" || action === "test-evolution") {
+        const { api_url, api_key, provider } = await req.json();
+        const testProvider = provider || "evolution";
 
         const diagnostics: any = {
           success: false,
@@ -69,13 +69,31 @@ serve(async (req) => {
           http_status: null,
         };
 
+        if (!api_url) {
+          diagnostics.error_detail = "API URL tidak dikonfigurasi";
+          return new Response(JSON.stringify(diagnostics), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
         const baseUrl = api_url.replace(/\/$/, "");
         const startTime = Date.now();
 
         try {
-          const res = await fetch(`${baseUrl}/instance/fetchInstances`, {
-            headers: { apikey: api_key },
-          });
+          let testUrl = "";
+          const headers: Record<string, string> = {};
+
+          if (testProvider === "evolution") {
+            testUrl = `${baseUrl}/instance/fetchInstances`;
+            if (api_key) headers.apikey = api_key;
+          } else if (testProvider === "wwebjs") {
+            testUrl = `${baseUrl}/status?token=${api_key || ""}`;
+          } else {
+            // Custom/n8n — just ping the URL
+            testUrl = baseUrl;
+          }
+
+          const res = await fetch(testUrl, { headers });
           diagnostics.latency_ms = Date.now() - startTime;
           diagnostics.http_status = res.status;
           diagnostics.reachable = true;
@@ -84,7 +102,11 @@ serve(async (req) => {
             const data = await res.json();
             diagnostics.success = true;
             diagnostics.auth_valid = true;
-            diagnostics.instances = Array.isArray(data) ? data.length : 0;
+            if (testProvider === "evolution") {
+              diagnostics.instances = Array.isArray(data) ? data.length : 0;
+            } else if (testProvider === "wwebjs") {
+              diagnostics.instances = data?.sessions?.length || (data?.status ? 1 : 0);
+            }
           } else {
             const errText = await res.text();
             diagnostics.auth_valid = res.status !== 401 && res.status !== 403;
