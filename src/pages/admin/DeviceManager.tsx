@@ -5,6 +5,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
@@ -17,7 +18,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Loader2, Plus, RefreshCw, Server, Trash2, Activity, CheckCircle2, XCircle, AlertTriangle, Stethoscope, Wifi, WifiOff, Clock } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
-import { useClientsList, useDeviceSessions } from "@/hooks/useAdminData";
+import { useClientsList, useDeviceSessions, useSettings } from "@/hooks/useAdminData";
 import InstanceCard from "@/components/admin/InstanceCard";
 
 interface VpsInstance { name: string; status: string; }
@@ -28,17 +29,25 @@ interface TestAllResult {
 }
 interface DiagnosticsResult {
   evolution_reachable: boolean;
+  provider_reachable: boolean;
   latency_ms: number;
   summary: { connected: number; connecting: number; disconnected: number; error: number; total_vps: number; total_db: number };
   instance_details: any[];
   recommendations: string[];
 }
 
+const PROVIDER_LABELS: Record<string, string> = {
+  evolution: "Evolution API",
+  wwebjs: "WA Bridge Lite",
+  n8n: "n8n / Custom",
+};
+
 export default function DeviceManager() {
   const [selectedClientId, setSelectedClientId] = useState("");
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [instanceName, setInstanceName] = useState("");
+  const [createProvider, setCreateProvider] = useState("evolution");
   const [vpsInstances, setVpsInstances] = useState<VpsInstance[] | null>(null);
   const [vpsOpen, setVpsOpen] = useState(false);
   const [deleteAllOpen, setDeleteAllOpen] = useState(false);
@@ -49,27 +58,14 @@ export default function DeviceManager() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  // React Query hooks
   const { data: clients = [] } = useClientsList();
   const { data: sessions = [], isLoading: loading } = useDeviceSessions(selectedClientId);
+  const { data: platformSettings } = useSettings();
+
+  const activeProvider = platformSettings?.wa_provider || "evolution";
 
   const invokeManage = useCallback(async (action: string, body: Record<string, any>, method = "POST") => {
     const fnName = "manage-wa-instance";
-    const opts: any = { method, body: { ...body, action } };
-    if (method === "DELETE") {
-      opts.body = body;
-    } else {
-      opts.body = { ...body };
-    }
-
-    const { data, error } = await supabase.functions.invoke(fnName, {
-      body: { ...body },
-      method: method as any,
-      headers: action ? { "x-action": action } : undefined,
-    });
-
-    // The edge function uses query params for action, so we need to use fetch with query params
-    // supabase.functions.invoke doesn't support query params, so we use a thin wrapper
     const { data: { session: authSession } } = await supabase.auth.getSession();
     if (!authSession?.access_token) {
       throw new Error("Not authenticated");
@@ -133,7 +129,7 @@ export default function DeviceManager() {
     if (!selectedClientId || !instanceName.trim()) return;
     setActionLoading("create");
     try {
-      await invokeManage("create", { client_id: selectedClientId, instance_name: instanceName.trim() });
+      await invokeManage("create", { client_id: selectedClientId, instance_name: instanceName.trim(), provider: createProvider });
       toast({ title: "Instance dibuat!", description: "Scan QR code yang muncul." });
       setCreateOpen(false);
       setInstanceName("");
@@ -169,7 +165,7 @@ export default function DeviceManager() {
       setVpsInstances(result.instances || []);
       setVpsOpen(true);
     } catch (e: any) {
-      toast({ variant: "destructive", title: "Gagal ambil daftar VPS", description: e.message });
+      toast({ variant: "destructive", title: "Gagal ambil daftar", description: e.message });
     } finally {
       setActionLoading(null);
     }
@@ -239,11 +235,12 @@ export default function DeviceManager() {
     <div>
       <h1 className="mb-6 text-2xl font-bold text-foreground">Device & Connection</h1>
 
-      {/* Test All Connections Panel */}
+      {/* Test All Panel */}
       <div className="mb-6 rounded-lg border border-border bg-card p-4">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
             <Stethoscope className="h-4 w-4" /> Test Semua Koneksi
+            <Badge variant="outline" className="text-[10px] ml-2">{PROVIDER_LABELS[activeProvider] || activeProvider}</Badge>
           </h2>
           <div className="flex gap-2">
             <Button size="sm" variant="outline" className="gap-2" onClick={handleDiagnostics} disabled={diagLoading}>
@@ -310,11 +307,11 @@ export default function DeviceManager() {
             </div>
           </div>
         ) : (
-          <p className="text-xs text-muted-foreground">Klik "Test Sekarang" untuk memeriksa semua komponen: Evolution API, webhook, database, dan heartbeat.</p>
+          <p className="text-xs text-muted-foreground">Klik "Test Sekarang" untuk memeriksa semua komponen: provider API, webhook, database, dan heartbeat.</p>
         )}
       </div>
 
-      {/* Diagnostics Detail Panel */}
+      {/* Diagnostics */}
       {diagnostics && (
         <div className="mb-6 rounded-lg border border-border bg-card p-4">
           <h2 className="text-sm font-semibold text-foreground flex items-center gap-2 mb-3">
@@ -322,9 +319,9 @@ export default function DeviceManager() {
           </h2>
 
           <div className="flex items-center gap-3 mb-3 flex-wrap">
-            {diagnostics.evolution_reachable
-              ? <Badge className="gap-1 bg-green-500/20 text-green-700 border-green-500/30"><CheckCircle2 className="h-3 w-3" /> Evolution API Aktif ({diagnostics.latency_ms}ms)</Badge>
-              : <Badge className="gap-1 bg-destructive/20 text-destructive border-destructive/30"><XCircle className="h-3 w-3" /> Evolution API Tidak Aktif</Badge>
+            {(diagnostics.provider_reachable ?? diagnostics.evolution_reachable)
+              ? <Badge className="gap-1 bg-green-500/20 text-green-700 border-green-500/30"><CheckCircle2 className="h-3 w-3" /> Provider Aktif ({diagnostics.latency_ms}ms)</Badge>
+              : <Badge className="gap-1 bg-destructive/20 text-destructive border-destructive/30"><XCircle className="h-3 w-3" /> Provider Tidak Aktif</Badge>
             }
             <Badge variant="outline" className="gap-1"><Server className="h-3 w-3" /> VPS: {diagnostics.summary.total_vps} | DB: {diagnostics.summary.total_db}</Badge>
           </div>
@@ -345,7 +342,12 @@ export default function DeviceManager() {
               {diagnostics.instance_details.map((inst, i) => (
                 <div key={i} className="rounded-md border border-border px-3 py-2 space-y-1">
                   <div className="flex items-center justify-between">
-                    <code className="text-sm font-medium">{inst.instance_name}</code>
+                    <div className="flex items-center gap-2">
+                      <code className="text-sm font-medium">{inst.instance_name}</code>
+                      {inst.provider && (
+                        <Badge variant="outline" className="text-[10px]">{inst.provider?.toUpperCase()}</Badge>
+                      )}
+                    </div>
                     <div className="flex items-center gap-2">
                       {inst.in_vps && <Badge variant="outline" className="text-xs">VPS</Badge>}
                       {inst.in_db && <Badge variant="outline" className="text-xs">DB</Badge>}
@@ -377,7 +379,7 @@ export default function DeviceManager() {
                   {inst.last_error && (
                     <p className="text-xs text-destructive">{inst.last_error}</p>
                   )}
-                  {inst.recommendations.length > 0 && (
+                  {inst.recommendations?.length > 0 && (
                     <div className="space-y-0.5">
                       {inst.recommendations.map((rec: string, j: number) => (
                         <p key={j} className="text-xs text-yellow-600 flex items-center gap-1">
@@ -410,7 +412,7 @@ export default function DeviceManager() {
 
         <Button size="sm" variant="outline" className="gap-2" onClick={handleFetchVps} disabled={actionLoading === "vps-list"}>
           {actionLoading === "vps-list" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Server className="h-4 w-4" />}
-          Lihat Instance VPS
+          Lihat Instance Provider
         </Button>
 
         <AlertDialog open={deleteAllOpen} onOpenChange={setDeleteAllOpen}>
@@ -421,7 +423,7 @@ export default function DeviceManager() {
             <AlertDialogHeader>
               <AlertDialogTitle>Hapus Semua Instance?</AlertDialogTitle>
               <AlertDialogDescription>
-                Semua instance di VPS dan database akan dihapus. Anda harus membuat instance baru setelah ini. Aksi ini tidak bisa dibatalkan.
+                Semua instance di provider dan database akan dihapus. Aksi ini tidak bisa dibatalkan.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -437,7 +439,7 @@ export default function DeviceManager() {
           <>
             <Button size="sm" variant="outline" className="gap-2" onClick={handleSync} disabled={actionLoading === "sync"}>
               {actionLoading === "sync" ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-              Sync dari VPS
+              Sync dari Provider
             </Button>
 
             <Dialog open={createOpen} onOpenChange={setCreateOpen}>
@@ -449,10 +451,24 @@ export default function DeviceManager() {
               <DialogContent>
                 <DialogHeader>
                   <DialogTitle>Buat Instance WhatsApp</DialogTitle>
-                  <DialogDescription>Masukkan nama instance untuk membuat koneksi WhatsApp baru.</DialogDescription>
+                  <DialogDescription>Masukkan nama instance dan pilih provider.</DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4 py-4">
-                  <Input placeholder="Nama instance (misal: mantra-bot-1)" value={instanceName} onChange={(e) => setInstanceName(e.target.value)} />
+                  <div className="space-y-2">
+                    <Label>Nama Instance</Label>
+                    <Input placeholder="Nama instance (misal: mantra-bot-1)" value={instanceName} onChange={(e) => setInstanceName(e.target.value)} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Provider</Label>
+                    <Select value={createProvider} onValueChange={setCreateProvider}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="evolution">Evolution API</SelectItem>
+                        <SelectItem value="wwebjs">WA Bridge Lite (WWeb.js)</SelectItem>
+                        <SelectItem value="n8n">Custom / n8n</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
                 <DialogFooter>
                   <Button onClick={handleCreate} disabled={!instanceName.trim() || actionLoading === "create"}>
@@ -470,8 +486,8 @@ export default function DeviceManager() {
       <Dialog open={vpsOpen} onOpenChange={setVpsOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Instance di VPS</DialogTitle>
-            <DialogDescription>Daftar semua instance yang ada di Evolution API server.</DialogDescription>
+            <DialogTitle>Instance di Provider</DialogTitle>
+            <DialogDescription>Daftar semua instance yang ada di {PROVIDER_LABELS[activeProvider] || "provider"} server.</DialogDescription>
           </DialogHeader>
           <div className="space-y-2 max-h-[400px] overflow-y-auto">
             {vpsInstances && vpsInstances.length > 0 ? (
@@ -484,7 +500,7 @@ export default function DeviceManager() {
                 </div>
               ))
             ) : (
-              <p className="text-sm text-muted-foreground text-center py-4">Tidak ada instance di VPS.</p>
+              <p className="text-sm text-muted-foreground text-center py-4">Tidak ada instance di provider.</p>
             )}
           </div>
         </DialogContent>
@@ -513,7 +529,7 @@ export default function DeviceManager() {
             ))
           ) : (
             <p className="text-sm text-muted-foreground">
-              Belum ada instance untuk client ini. Klik "Sync dari VPS" untuk import, atau "Buat Instance" untuk membuat baru.
+              Belum ada instance untuk client ini. Klik "Sync dari Provider" untuk import, atau "Buat Instance" untuk membuat baru.
             </p>
           )}
         </div>

@@ -18,7 +18,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Switch } from "@/components/ui/switch";
-import { Loader2, Plus, Trash2, TestTube, Save, Copy, CheckCircle, ArrowRight, Brain, MessageSquare, Database, Activity, Wifi, WifiOff, Clock } from "lucide-react";
+import { Loader2, Plus, Trash2, TestTube, Save, Copy, CheckCircle, ArrowRight, Brain, MessageSquare, Database, Activity, Wifi, WifiOff, Clock, Link2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSettings, useAdminUsers } from "@/hooks/useAdminData";
@@ -45,6 +45,12 @@ const PROMPT_PRESETS: Record<string, string> = {
   friendly: `Halo! Kamu adalah helper ramah untuk {{business_name}} 😊 Jawab dengan santai dan hangat seperti teman. Bantu customer dengan info yang mereka butuhkan. Gunakan data berikut jika ada:\n\n{{context}}`,
 };
 
+const PROVIDER_OPTIONS = [
+  { value: "evolution", label: "Evolution API", description: "REST API wrapper untuk WhatsApp (Baileys-based)" },
+  { value: "wwebjs", label: "WA Bridge Lite (WWeb.js)", description: "WhatsApp Web.js bridge — lightweight, gratis" },
+  { value: "n8n", label: "Custom / n8n", description: "n8n workflow atau custom provider via webhook" },
+];
+
 export default function Settings() {
   const { toast } = useToast();
   const qc = useQueryClient();
@@ -54,20 +60,19 @@ export default function Settings() {
   const [saving, setSaving] = useState(false);
   const [activePreset, setActivePreset] = useState("custom");
 
-  // Admin invite
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [invitePassword, setInvitePassword] = useState("");
   const [inviting, setInviting] = useState(false);
 
-  // Evolution test & diagnostics
   const [testing, setTesting] = useState(false);
   const [diagnostics, setDiagnostics] = useState<DiagnosticsResult | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
 
   const webhookUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/wa-webhook`;
+  const snapshotUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/system-snapshot`;
+  const activeProvider = settings.wa_provider || "evolution";
 
-  // Sync loaded settings into local state
   useEffect(() => {
     if (loadedSettings) {
       setSettings(loadedSettings);
@@ -88,7 +93,6 @@ export default function Settings() {
     } else {
       toast({ title: "Settings disimpan" });
       setSettings((prev) => ({ ...prev, ...updates }));
-      // Invalidate ALL queries so every module picks up new config immediately
       qc.invalidateQueries();
     }
     setSaving(false);
@@ -120,14 +124,26 @@ export default function Settings() {
     }
   };
 
-  const handleTestEvolution = async () => {
+  const handleTestProvider = async () => {
     setTesting(true);
     setDiagnostics(null);
     const session = await supabase.auth.getSession();
     const token = session.data.session?.access_token;
     try {
+      const testBody: any = { provider: activeProvider };
+      if (activeProvider === "evolution") {
+        testBody.api_url = settings.evolution_api_url || "";
+        testBody.api_key = settings.evolution_api_key || "";
+      } else if (activeProvider === "wwebjs") {
+        testBody.api_url = settings.wwebjs_api_url || "";
+        testBody.api_key = settings.wwebjs_api_key || "";
+      } else {
+        testBody.api_url = settings.n8n_webhook_url || settings.custom_send_url || "";
+        testBody.api_key = "";
+      }
+
       const directRes = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-settings?action=test-evolution`,
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/manage-settings?action=test-provider`,
         {
           method: "POST",
           headers: {
@@ -135,32 +151,24 @@ export default function Settings() {
             "Content-Type": "application/json",
             apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
           },
-          body: JSON.stringify({
-            api_url: settings.evolution_api_url || "",
-            api_key: settings.evolution_api_key || "",
-          }),
+          body: JSON.stringify(testBody),
         }
       );
       const data: DiagnosticsResult = await directRes.json();
       setDiagnostics(data);
     } catch {
       setDiagnostics({
-        success: false,
-        instances: 0,
-        latency_ms: 0,
-        auth_valid: false,
-        reachable: false,
-        error_detail: "Koneksi gagal — tidak bisa menghubungi server",
-        http_status: null,
+        success: false, instances: 0, latency_ms: 0, auth_valid: false,
+        reachable: false, error_detail: "Koneksi gagal — tidak bisa menghubungi server", http_status: null,
       });
     }
     setTesting(false);
   };
 
-  const copyWebhookUrl = () => {
-    navigator.clipboard.writeText(webhookUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const copyToClipboard = (text: string, key: string) => {
+    navigator.clipboard.writeText(text);
+    setCopied(key);
+    setTimeout(() => setCopied(null), 2000);
   };
 
   const updateSetting = (key: string, value: string) => {
@@ -179,7 +187,6 @@ export default function Settings() {
     updateSetting("ai_system_prompt", JSON.stringify(value));
   };
 
-  // Connection status badge helper
   const getConnectionBadge = () => {
     if (!diagnostics) return null;
     if (diagnostics.success && diagnostics.latency_ms < 500) {
@@ -189,6 +196,23 @@ export default function Settings() {
       return <Badge className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30 gap-1"><Clock className="h-3 w-3" /> Slow ({diagnostics.latency_ms}ms)</Badge>;
     }
     return <Badge variant="destructive" className="gap-1"><WifiOff className="h-3 w-3" /> Unreachable</Badge>;
+  };
+
+  // Build save payload for provider tab
+  const getProviderSavePayload = (): Record<string, string> => {
+    const base: Record<string, string> = { wa_provider: activeProvider, wa_webhook_secret: settings.wa_webhook_secret || "" };
+    if (activeProvider === "evolution") {
+      base.evolution_api_url = settings.evolution_api_url || "";
+      base.evolution_api_key = settings.evolution_api_key || "";
+    } else if (activeProvider === "wwebjs") {
+      base.wwebjs_api_url = settings.wwebjs_api_url || "";
+      base.wwebjs_api_key = settings.wwebjs_api_key || "";
+    } else {
+      base.n8n_webhook_url = settings.n8n_webhook_url || "";
+      base.custom_send_url = settings.custom_send_url || "";
+      base.custom_auth_header = settings.custom_auth_header || "";
+    }
+    return base;
   };
 
   if (loading) {
@@ -204,11 +228,12 @@ export default function Settings() {
       <h1 className="text-2xl font-bold text-foreground">Settings</h1>
 
       <Tabs defaultValue="admins">
-        <TabsList className="mb-4">
+        <TabsList className="mb-4 flex-wrap">
           <TabsTrigger value="admins">Admin Users</TabsTrigger>
-          <TabsTrigger value="whatsapp">WhatsApp API</TabsTrigger>
+          <TabsTrigger value="whatsapp">WhatsApp Provider</TabsTrigger>
           <TabsTrigger value="ai">AI Configuration</TabsTrigger>
           <TabsTrigger value="safety">Safety & Limits</TabsTrigger>
+          <TabsTrigger value="endpoints">Endpoints & Integration</TabsTrigger>
         </TabsList>
 
         {/* Tab 1: Admin Users */}
@@ -282,39 +307,106 @@ export default function Settings() {
           </div>
         </TabsContent>
 
-        {/* Tab 2: WhatsApp API */}
+        {/* Tab 2: WhatsApp Provider */}
         <TabsContent value="whatsapp">
           <div className="rounded-lg border border-border bg-card p-6 space-y-6">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-sm font-semibold text-foreground mb-1">WhatsApp / Evolution API</h3>
-                <p className="text-xs text-muted-foreground">Konfigurasi koneksi ke Evolution API. Perubahan langsung berlaku di semua modul.</p>
+                <h3 className="text-sm font-semibold text-foreground mb-1">WhatsApp Provider</h3>
+                <p className="text-xs text-muted-foreground">Pilih dan konfigurasi provider WhatsApp. Perubahan langsung berlaku di semua modul.</p>
               </div>
               {getConnectionBadge()}
             </div>
             <Separator />
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Evolution API URL</Label>
-                <Input value={settings.evolution_api_url || ""} onChange={(e) => updateSetting("evolution_api_url", e.target.value)} placeholder="https://your-evolution-api.com" />
-              </div>
-              <div className="space-y-2">
-                <Label>API Key</Label>
-                <Input type="password" value={settings.evolution_api_key || ""} onChange={(e) => updateSetting("evolution_api_key", e.target.value)} placeholder="Evolution API key" />
-              </div>
+
+            {/* Provider Selector */}
+            <div className="space-y-2">
+              <Label>Active Provider</Label>
+              <Select value={activeProvider} onValueChange={(v) => updateSetting("wa_provider", v)}>
+                <SelectTrigger className="w-full md:w-96"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {PROVIDER_OPTIONS.map((p) => (
+                    <SelectItem key={p.value} value={p.value}>
+                      <div>
+                        <span className="font-medium">{p.label}</span>
+                        <span className="text-xs text-muted-foreground ml-2">— {p.description}</span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
+
+            <Separator />
+
+            {/* Dynamic Fields per Provider */}
+            {activeProvider === "evolution" && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Evolution API URL</Label>
+                    <Input value={settings.evolution_api_url || ""} onChange={(e) => updateSetting("evolution_api_url", e.target.value)} placeholder="https://your-evolution-api.com" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>API Key</Label>
+                    <Input type="password" value={settings.evolution_api_key || ""} onChange={(e) => updateSetting("evolution_api_key", e.target.value)} placeholder="Evolution API key" />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeProvider === "wwebjs" && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>WA Bridge Lite URL</Label>
+                    <Input value={settings.wwebjs_api_url || ""} onChange={(e) => updateSetting("wwebjs_api_url", e.target.value)} placeholder="http://43.157.223.29:3020" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>API Token</Label>
+                    <Input type="password" value={settings.wwebjs_api_key || ""} onChange={(e) => updateSetting("wwebjs_api_key", e.target.value)} placeholder="Token wa-bridge-lite" />
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">wa-bridge-lite menggunakan endpoint: <code>/send?session=name&token=key</code></p>
+              </div>
+            )}
+
+            {activeProvider === "n8n" && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>n8n Webhook URL</Label>
+                    <Input value={settings.n8n_webhook_url || ""} onChange={(e) => updateSetting("n8n_webhook_url", e.target.value)} placeholder="https://your-n8n.com/webhook/..." />
+                    <p className="text-xs text-muted-foreground">URL dimana wa-bridge-lite mengirim event ke n8n</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Send Message URL</Label>
+                    <Input value={settings.custom_send_url || ""} onChange={(e) => updateSetting("custom_send_url", e.target.value)} placeholder="http://43.157.223.29:3020" />
+                    <p className="text-xs text-muted-foreground">URL untuk mengirim pesan WA (dipakai saat eskalasi)</p>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label>Auth Header (opsional)</Label>
+                  <Input value={settings.custom_auth_header || ""} onChange={(e) => updateSetting("custom_auth_header", e.target.value)} placeholder="Bearer xxx atau token xxx" />
+                </div>
+              </div>
+            )}
+
             <div className="space-y-2">
               <Label>Webhook Secret</Label>
               <Input type="password" value={settings.wa_webhook_secret || ""} onChange={(e) => updateSetting("wa_webhook_secret", e.target.value)} placeholder="Secret untuk verifikasi webhook" />
             </div>
+
             <Separator />
+
+            {/* Webhook URL display */}
             <div className="rounded-lg border border-border p-4 bg-muted/50">
               <Label className="text-sm font-medium">Webhook URL</Label>
-              <p className="text-xs text-muted-foreground mt-1 mb-2">Set URL ini di Evolution API dashboard sebagai webhook callback.</p>
+              <p className="text-xs text-muted-foreground mt-1 mb-2">Set URL ini di provider sebagai webhook callback.</p>
               <div className="flex items-center gap-2">
                 <code className="flex-1 text-xs bg-background rounded px-3 py-2 border border-border break-all">{webhookUrl}</code>
-                <Button variant="outline" size="icon" onClick={copyWebhookUrl}>
-                  {copied ? <CheckCircle className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                <Button variant="outline" size="icon" onClick={() => copyToClipboard(webhookUrl, "webhook")}>
+                  {copied === "webhook" ? <CheckCircle className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
                 </Button>
               </div>
             </div>
@@ -322,13 +414,12 @@ export default function Settings() {
             {/* Test & Diagnostics */}
             <div className="space-y-3">
               <div className="flex items-center gap-3">
-                <Button variant="outline" onClick={handleTestEvolution} disabled={testing}>
+                <Button variant="outline" onClick={handleTestProvider} disabled={testing}>
                   {testing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <TestTube className="mr-2 h-4 w-4" />}
                   Verify Integration
                 </Button>
               </div>
 
-              {/* Live Diagnostics Panel */}
               {diagnostics && (
                 <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
                   <div className="flex items-center gap-2">
@@ -374,7 +465,7 @@ export default function Settings() {
               )}
             </div>
 
-            <Button onClick={() => saveSettings({ evolution_api_url: settings.evolution_api_url || "", evolution_api_key: settings.evolution_api_key || "", wa_webhook_secret: settings.wa_webhook_secret || "" })} disabled={saving}>
+            <Button onClick={() => saveSettings(getProviderSavePayload())} disabled={saving}>
               {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               <Save className="mr-2 h-4 w-4" /> Simpan
             </Button>
@@ -390,7 +481,6 @@ export default function Settings() {
             </div>
             <Separator />
 
-            {/* Prompt Presets */}
             <div className="space-y-2">
               <Label>Prompt Preset</Label>
               <Select value={activePreset} onValueChange={handlePresetChange}>
@@ -449,7 +539,6 @@ export default function Settings() {
 
             <Separator />
 
-            {/* Section B: AI Behavior Pipeline */}
             <div className="space-y-1">
               <h4 className="text-sm font-semibold text-foreground flex items-center gap-2">
                 <Brain className="h-4 w-4" /> AI Behavior Pipeline
@@ -457,7 +546,6 @@ export default function Settings() {
               <p className="text-xs text-muted-foreground">Kontrol perilaku AI saat merespon pesan masuk.</p>
             </div>
 
-            {/* Visual Pipeline */}
             <div className="rounded-lg border border-border bg-muted/30 p-4">
               <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground flex-wrap">
                 <span className="px-2 py-1 rounded border border-border bg-background">Pesan Masuk</span>
@@ -483,7 +571,6 @@ export default function Settings() {
                     <SelectItem value="custom_message">Kirim Pesan Custom</SelectItem>
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-muted-foreground">Aksi jika tidak ada dokumen RAG yang cocok.</p>
               </div>
               <div className="space-y-2">
                 <Label>Escalation Keyword</Label>
@@ -492,7 +579,6 @@ export default function Settings() {
                   onChange={(e) => updateSetting("escalation_keyword", e.target.value)}
                   placeholder="ESKALASI_HUMAN"
                 />
-                <p className="text-xs text-muted-foreground">Kata kunci trigger eskalasi dari respons AI.</p>
               </div>
             </div>
 
@@ -516,12 +602,10 @@ export default function Settings() {
                 onChange={(e) => updateSetting("escalation_message", JSON.stringify(e.target.value))}
                 placeholder="Mohon tunggu kak, saya sedang menyambungkan dengan Admin kami. 🙏"
               />
-              <p className="text-xs text-muted-foreground">Pesan yang dikirim ke customer saat percakapan di-eskalasi.</p>
             </div>
 
             <Separator />
 
-            {/* Section C: Context & Memory */}
             <div className="space-y-1">
               <h4 className="text-sm font-semibold text-foreground flex items-center gap-2">
                 <Database className="h-4 w-4" /> Context & Memory
@@ -536,29 +620,16 @@ export default function Settings() {
                 onValueChange={([v]) => updateSetting("history_length", String(v))}
                 min={1} max={20} step={1}
               />
-              <p className="text-xs text-muted-foreground">Jumlah pesan terakhir yang dikirim ke AI sebagai konteks memori.</p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label>History Char Limit</Label>
-                <Input
-                  type="number"
-                  value={settings.history_char_limit || "3000"}
-                  onChange={(e) => updateSetting("history_char_limit", e.target.value)}
-                  min={500} max={10000}
-                />
-                <p className="text-xs text-muted-foreground">Batas karakter total history chat.</p>
+                <Input type="number" value={settings.history_char_limit || "3000"} onChange={(e) => updateSetting("history_char_limit", e.target.value)} min={500} max={10000} />
               </div>
               <div className="space-y-2">
                 <Label>RAG Result Count</Label>
-                <Input
-                  type="number"
-                  value={settings.rag_result_count || "3"}
-                  onChange={(e) => updateSetting("rag_result_count", e.target.value)}
-                  min={1} max={10}
-                />
-                <p className="text-xs text-muted-foreground">Jumlah chunk dokumen yang dicari.</p>
+                <Input type="number" value={settings.rag_result_count || "3"} onChange={(e) => updateSetting("rag_result_count", e.target.value)} min={1} max={10} />
               </div>
             </div>
 
@@ -626,6 +697,73 @@ export default function Settings() {
               {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               <Save className="mr-2 h-4 w-4" /> Simpan
             </Button>
+          </div>
+        </TabsContent>
+
+        {/* Tab 5: Endpoints & Integration */}
+        <TabsContent value="endpoints">
+          <div className="rounded-lg border border-border bg-card p-6 space-y-6">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground mb-1 flex items-center gap-2">
+                <Link2 className="h-4 w-4" /> Endpoints & Integration
+              </h3>
+              <p className="text-xs text-muted-foreground">URL endpoint untuk integrasi eksternal (n8n, AstrBot, wa-bridge-lite, dll).</p>
+            </div>
+            <Separator />
+
+            <div className="space-y-4">
+              <div className="rounded-lg border border-border p-4 space-y-2">
+                <Label className="text-sm font-medium">Webhook URL (untuk provider WA)</Label>
+                <p className="text-xs text-muted-foreground">Set URL ini di wa-bridge-lite / Evolution API sebagai callback.</p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 text-xs bg-background rounded px-3 py-2 border border-border break-all">{webhookUrl}</code>
+                  <Button variant="outline" size="icon" onClick={() => copyToClipboard(webhookUrl, "wh")}>
+                    {copied === "wh" ? <CheckCircle className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                  </Button>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-border p-4 space-y-2">
+                <Label className="text-sm font-medium">System Snapshot URL (untuk AstrBot)</Label>
+                <p className="text-xs text-muted-foreground">AstrBot bisa memanggil endpoint ini untuk membaca kondisi sistem.</p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 text-xs bg-background rounded px-3 py-2 border border-border break-all">{snapshotUrl}</code>
+                  <Button variant="outline" size="icon" onClick={() => copyToClipboard(snapshotUrl, "snap")}>
+                    {copied === "snap" ? <CheckCircle className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                  </Button>
+                </div>
+              </div>
+
+              <Separator />
+
+              <div className="rounded-lg border border-border p-4 space-y-3 bg-muted/30">
+                <Label className="text-sm font-medium">n8n Webhook Payload Template</Label>
+                <p className="text-xs text-muted-foreground">Format payload yang dikirim wa-bridge-lite ke n8n webhook:</p>
+                <pre className="text-xs bg-background rounded px-4 py-3 border border-border overflow-x-auto font-mono">
+{`{
+  "type": "message",
+  "session": "instance_name",
+  "from": "628xxxxxxxxxx",
+  "body": "Pesan dari customer",
+  "timestamp": 1234567890
+}`}
+                </pre>
+              </div>
+
+              <div className="rounded-lg border border-border p-4 space-y-3 bg-muted/30">
+                <Label className="text-sm font-medium">n8n → Database Logging</Label>
+                <p className="text-xs text-muted-foreground">n8n bisa log pesan ke database via REST API:</p>
+                <pre className="text-xs bg-background rounded px-4 py-3 border border-border overflow-x-auto font-mono">
+{`POST ${import.meta.env.VITE_SUPABASE_URL}/rest/v1/wa_messages
+Headers:
+  apikey: <anon key>
+  Authorization: Bearer <service role key>
+  Content-Type: application/json
+Body:
+  { "conversation_id": "...", "sender": "AI", "content": "..." }`}
+                </pre>
+              </div>
+            </div>
           </div>
         </TabsContent>
       </Tabs>

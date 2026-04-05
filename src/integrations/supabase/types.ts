@@ -374,6 +374,7 @@ export type Database = {
           instance_name: string | null
           last_error: string | null
           last_webhook_event_at: string | null
+          provider: string
           qr_code: string | null
           status: string
           updated_at: string
@@ -385,6 +386,7 @@ export type Database = {
           instance_name?: string | null
           last_error?: string | null
           last_webhook_event_at?: string | null
+          provider?: string
           qr_code?: string | null
           status?: string
           updated_at?: string
@@ -396,6 +398,7 @@ export type Database = {
           instance_name?: string | null
           last_error?: string | null
           last_webhook_event_at?: string | null
+          provider?: string
           qr_code?: string | null
           status?: string
           updated_at?: string
