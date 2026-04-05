@@ -729,38 +729,65 @@ serve(async (req) => {
 
 // Config-aware: receives API URL/key + delay settings from dynamic config
 async function sendWhatsAppMessage(phoneNumber: string, message: string, instanceName: string, cfg: Record<string, string>) {
-  const baseUrl = cfg.evolution_api_url.replace(/\/$/, "");
-  const apiKey = cfg.evolution_api_key;
-  if (!baseUrl || !apiKey) {
-    console.error("Evolution API not configured in dynamic config");
-    return;
-  }
   const normalizedPhone = phoneNumber.replace(/\D/g, "");
-
   const delayMin = parseFloat(cfg.anti_ban_delay_min || "2") * 1000;
   const delayMax = parseFloat(cfg.anti_ban_delay_max || "4") * 1000;
 
-  try {
-    await fetch(`${baseUrl}/chat/presence/${instanceName}`, {
+  // Determine provider from config
+  const provider = cfg.wa_provider || "evolution";
+
+  if (provider === "wwebjs") {
+    const baseUrl = (cfg.wwebjs_api_url || "").replace(/\/$/, "");
+    const token = cfg.wwebjs_api_key || "";
+    if (!baseUrl) { console.error("WWebJS API not configured"); return; }
+
+    await new Promise((r) => setTimeout(r, delayMin + Math.random() * (delayMax - delayMin)));
+
+    const res = await fetch(`${baseUrl}/send?session=${encodeURIComponent(instanceName)}&token=${encodeURIComponent(token)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ to: normalizedPhone, text: message }),
+    });
+    if (!res.ok) { const errText = await res.text(); console.error("WWebJS send error:", res.status, errText); }
+
+  } else if (provider === "n8n" || provider === "custom") {
+    const sendUrl = (cfg.custom_send_url || cfg.n8n_webhook_url || "").replace(/\/$/, "");
+    if (!sendUrl) { console.error("Custom provider not configured"); return; }
+
+    await new Promise((r) => setTimeout(r, delayMin + Math.random() * (delayMax - delayMin)));
+
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (cfg.custom_auth_header) headers["Authorization"] = cfg.custom_auth_header;
+
+    const res = await fetch(sendUrl, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ to: normalizedPhone, message, instance_name: instanceName }),
+    });
+    if (!res.ok) { const errText = await res.text(); console.error("Custom send error:", res.status, errText); }
+
+  } else {
+    // Evolution API (default)
+    const baseUrl = cfg.evolution_api_url.replace(/\/$/, "");
+    const apiKey = cfg.evolution_api_key;
+    if (!baseUrl || !apiKey) { console.error("Evolution API not configured"); return; }
+
+    try {
+      await fetch(`${baseUrl}/chat/presence/${instanceName}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: apiKey },
+        body: JSON.stringify({ number: normalizedPhone, presence: "composing" }),
+      });
+    } catch (e) { console.warn("Typing indicator failed:", e); }
+
+    await new Promise((r) => setTimeout(r, delayMin + Math.random() * (delayMax - delayMin)));
+
+    const res = await fetch(`${baseUrl}/message/sendText/${instanceName}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", apikey: apiKey },
-      body: JSON.stringify({ number: normalizedPhone, presence: "composing" }),
+      body: JSON.stringify({ number: normalizedPhone, text: message }),
     });
-  } catch (e) {
-    console.warn("Typing indicator failed:", e);
-  }
-
-  await new Promise((r) => setTimeout(r, delayMin + Math.random() * (delayMax - delayMin)));
-
-  const res = await fetch(`${baseUrl}/message/sendText/${instanceName}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", apikey: apiKey },
-    body: JSON.stringify({ number: normalizedPhone, text: message }),
-  });
-
-  if (!res.ok) {
-    const errText = await res.text();
-    console.error("Evolution send error:", res.status, errText);
+    if (!res.ok) { const errText = await res.text(); console.error("Evolution send error:", res.status, errText); }
   }
 }
 
