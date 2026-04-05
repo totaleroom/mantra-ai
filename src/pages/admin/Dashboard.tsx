@@ -13,6 +13,14 @@ import {
 } from "@/hooks/useAdminData";
 import { format } from "date-fns";
 
+const PROVIDER_LABELS: Record<string, string> = {
+  evolution: "EVOLUTION",
+  wwebjs: "WWEBJS",
+  n8n: "N8N",
+  custom: "CUSTOM",
+  baileys: "BAILEYS",
+};
+
 function IndustrialBar({ label, value, max, displayValue }: { label: string; value: number; max: number; displayValue: string }) {
   const pct = max > 0 ? Math.min(100, Math.round((value / max) * 100)) : 0;
   return (
@@ -42,20 +50,27 @@ export default function Dashboard() {
   const clients = clientsData || [];
   const activeClients = clients.filter((c: any) => c.status === "active").length;
 
-  // Quota usage calculation
   const totalQuotaLimit = clients.reduce((s: number, c: any) => s + (c.quota_limit || 0), 0);
   const totalQuotaRemaining = clients.reduce((s: number, c: any) => s + (c.quota_remaining || 0), 0);
   const quotaUsed = totalQuotaLimit - totalQuotaRemaining;
   const quotaPct = totalQuotaLimit > 0 ? Math.round((quotaUsed / totalQuotaLimit) * 100) : 0;
 
-  // Throughput: messages today vs highest daily limit
   const maxDailyLimit = clients.reduce((m: number, c: any) => Math.max(m, c.daily_message_limit || 0), 0);
   const throughputPct = maxDailyLimit > 0 ? Math.min(100, Math.round((messagesToday / maxDailyLimit) * 100)) : 0;
 
-  // Session uptime
   const waTotal = healthData?.waSessions.total || 0;
   const waConnected = healthData?.waSessions.connected || 0;
   const sessionPct = waTotal > 0 ? Math.round((waConnected / waTotal) * 100) : 0;
+
+  const activeProvider = healthData?.provider || "evolution";
+  const providerLabel = PROVIDER_LABELS[activeProvider] || activeProvider.toUpperCase();
+
+  // Sessions by provider summary text
+  const sessionsByProvider = healthData?.sessionsByProvider || {};
+  const providerSummaryParts = Object.entries(sessionsByProvider)
+    .filter(([, v]) => v.total > 0)
+    .map(([p, v]) => `${v.connected}/${v.total} ${PROVIDER_LABELS[p] || p}`);
+  const providerSummary = providerSummaryParts.length > 0 ? providerSummaryParts.join(", ") : "";
 
   const isLoading = loadingAttention && loadingHealth && loadingClients;
 
@@ -74,23 +89,20 @@ export default function Dashboard() {
     );
   }
 
-  // Find critical resources
   const criticalResources: string[] = [];
   if (quotaPct > 80) criticalResources.push("Quota pool mendekati batas");
   if (waTotal > 0 && waConnected === 0) criticalResources.push("Tidak ada WA session yang terhubung");
-  if (!healthData?.evolutionConfigured) criticalResources.push("Evolution API belum dikonfigurasi");
+  if (!healthData?.providerConfigured) criticalResources.push("WhatsApp provider belum dikonfigurasi");
 
   return (
     <div className="space-y-8">
-      {/* Header */}
       <header>
         <h1 className="text-4xl lg:text-5xl font-bold tracking-tighter text-foreground">CONTROL TOWER</h1>
-        <p className="text-muted-foreground uppercase tracking-widest text-xs mt-1">V2.4.0 / MANTRA AI MANAGEMENT INTERFACE</p>
+        <p className="text-muted-foreground uppercase tracking-widest text-xs mt-1">V3.0.0 / MULTI-PLATFORM ENGINE</p>
       </header>
 
       {/* Row 1: Metric Cards */}
       <div className="dashboard-grid">
-        {/* Active Clients */}
         <div className="bg-card border border-foreground/20 p-8 shadow-soft group hover:-translate-y-0.5 transition-transform">
           <div className="flex justify-between items-start mb-6">
             <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Active Clients</p>
@@ -105,7 +117,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Messages Today */}
         <div className="bg-card border border-foreground/20 p-8 shadow-soft group hover:-translate-y-0.5 transition-transform">
           <div className="flex justify-between items-start mb-6">
             <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Messages Today</p>
@@ -120,7 +131,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Quota Usage */}
         <div className="bg-card border border-foreground/20 p-8 shadow-soft group hover:-translate-y-0.5 transition-transform">
           <div className="flex justify-between items-start mb-6">
             <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Quota Usage</p>
@@ -137,7 +147,6 @@ export default function Dashboard() {
 
       {/* Row 2: Needs Attention + System Health */}
       <div className="dashboard-grid">
-        {/* Needs Attention (2 col) */}
         <div className="lg:col-span-2 bg-card border border-foreground/20 p-8 shadow-soft">
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-sm font-bold tracking-widest uppercase text-foreground flex items-center gap-2">
@@ -183,21 +192,25 @@ export default function Dashboard() {
           )}
         </div>
 
-        {/* System Health (1 col) */}
         <div className="bg-card border border-foreground/20 p-8 shadow-soft">
           <h2 className="text-xs font-bold uppercase tracking-widest text-foreground mb-8">System Health</h2>
           <div className="flex flex-col gap-6">
+            <div>
+              <IndustrialBar
+                label="WA-SESSIONS"
+                value={waConnected}
+                max={waTotal || 1}
+                displayValue={`${waConnected}/${waTotal}`}
+              />
+              {providerSummary && (
+                <p className="text-[9px] text-muted-foreground mt-1 font-mono">{providerSummary}</p>
+              )}
+            </div>
             <IndustrialBar
-              label="WA-SESSIONS"
-              value={waConnected}
-              max={waTotal || 1}
-              displayValue={`${waConnected}/${waTotal}`}
-            />
-            <IndustrialBar
-              label="EVO-API-GATEWAY"
-              value={healthData?.evolutionConfigured ? 1 : 0}
+              label={`WA-GATEWAY [${providerLabel}]`}
+              value={healthData?.providerConfigured ? 1 : 0}
               max={1}
-              displayValue={healthData?.evolutionConfigured ? "ONLINE" : "OFFLINE"}
+              displayValue={healthData?.providerConfigured ? "ONLINE" : "OFFLINE"}
             />
             <IndustrialBar
               label="QUOTA-POOL"
@@ -227,7 +240,6 @@ export default function Dashboard() {
 
       {/* Row 3: Resource Allocation + Raw System Logs */}
       <div className="dashboard-grid">
-        {/* Resource Allocation (1 col) */}
         <div className="bg-card border border-foreground/20 p-8 shadow-soft">
           <h2 className="text-xs font-bold uppercase tracking-widest text-foreground mb-8">Resource Allocation</h2>
           <div className="flex flex-col gap-6">
@@ -260,7 +272,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Raw System Logs (2 col, dark) */}
         <div className="lg:col-span-2 bg-foreground text-background p-8 shadow-soft flex flex-col justify-between">
           <div>
             <div className="flex items-center gap-2 mb-6">
@@ -283,7 +294,7 @@ export default function Dashboard() {
             </div>
           </div>
           <div className="mt-8 flex justify-between items-end border-t border-background/20 pt-6">
-            <p className="text-[10px] uppercase tracking-widest opacity-60">MANTRA AI / Runtime v2.4.0</p>
+            <p className="text-[10px] uppercase tracking-widest opacity-60">MANTRA AI / Runtime v3.0.0</p>
             <span className="text-[10px] font-mono opacity-40">{format(new Date(), "HH:mm:ss")}</span>
           </div>
         </div>

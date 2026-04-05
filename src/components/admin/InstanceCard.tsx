@@ -11,6 +11,14 @@ import {
 import { Loader2, Wifi, WifiOff, RotateCcw, LogOut as LogOutIcon, QrCode, Trash2, AlertTriangle, ChevronDown, Wrench, RefreshCw } from "lucide-react";
 import QRCode from "react-qr-code";
 
+const PROVIDER_BADGES: Record<string, { label: string; className: string }> = {
+  evolution: { label: "EVO", className: "bg-blue-500/20 text-blue-700 border-blue-500/30" },
+  wwebjs: { label: "WWEBJS", className: "bg-purple-500/20 text-purple-700 border-purple-500/30" },
+  n8n: { label: "N8N", className: "bg-orange-500/20 text-orange-700 border-orange-500/30" },
+  baileys: { label: "BAILEYS", className: "bg-teal-500/20 text-teal-700 border-teal-500/30" },
+  custom: { label: "CUSTOM", className: "bg-muted text-muted-foreground border-border" },
+};
+
 interface WaSession {
   id: string;
   client_id: string;
@@ -18,6 +26,7 @@ interface WaSession {
   qr_code: string | null;
   instance_name: string | null;
   last_error?: string | null;
+  provider?: string;
 }
 
 interface InstanceCardProps {
@@ -28,12 +37,13 @@ interface InstanceCardProps {
 
 export default function InstanceCard({ session, actionLoading, onAction }: InstanceCardProps) {
   const name = session.instance_name || "N/A";
+  const provider = session.provider || "evolution";
+  const providerBadge = PROVIDER_BADGES[provider] || PROVIDER_BADGES.custom;
   const isLoading = (action: string) => actionLoading === `${action}_${name}`;
   const isAnyLoading = !!actionLoading;
   const isQrBase64 = session.qr_code?.startsWith("data:") || session.qr_code?.startsWith("iVBOR");
   const [wizardOpen, setWizardOpen] = useState(false);
 
-  // Auto-refresh QR when connecting
   const [autoRefreshCount, setAutoRefreshCount] = useState(0);
   const [countdown, setCountdown] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -64,7 +74,6 @@ export default function InstanceCard({ session, actionLoading, onAction }: Insta
     };
   }, [session.status, session.qr_code, autoRefreshCount, isAnyLoading, name, onAction]);
 
-  // Reset auto-refresh when status changes from connecting
   useEffect(() => {
     if (session.status !== "connecting") {
       setAutoRefreshCount(0);
@@ -107,6 +116,7 @@ export default function InstanceCard({ session, actionLoading, onAction }: Insta
       {/* Header */}
       <div className="flex items-center gap-3 flex-wrap">
         <code className="rounded bg-muted px-2 py-1 text-sm font-medium">{name}</code>
+        <Badge className={`text-[10px] font-bold ${providerBadge.className}`}>{providerBadge.label}</Badge>
         {statusBadge()}
       </div>
 

@@ -36,7 +36,6 @@ export function useHumanEscalationCount() {
     refetchInterval: 10_000,
   });
 
-  // Realtime invalidation
   useEffect(() => {
     const channel = supabase
       .channel("rq-escalation")
@@ -83,22 +82,57 @@ export function useMessageStats() {
   });
 }
 
-// ── System health ──
+// ── System health (multi-provider aware) ──
 export function useSystemHealth() {
   return useQuery({
     queryKey: ["systemHealth"],
     queryFn: async () => {
-      const [sessionsRes, evoRes] = await Promise.all([
-        supabase.from("wa_sessions" as any).select("status"),
-        supabase.from("platform_settings" as any).select("value").eq("key", "evolution_api_url").maybeSingle(),
+      const [sessionsRes, settingsRes] = await Promise.all([
+        supabase.from("wa_sessions" as any).select("status, provider"),
+        supabase.from("platform_settings" as any).select("key, value"),
       ]);
       const sessions = (sessionsRes.data as any[]) || [];
       const total = sessions.length;
       const connected = sessions.filter((s: any) => s.status === "connected").length;
+
+      // Build settings map
+      const settingsMap: Record<string, string> = {};
+      for (const row of (settingsRes.data as any[]) || []) {
+        settingsMap[row.key] = row.value;
+      }
+
+      // Determine active provider
+      const provider = settingsMap.wa_provider || "evolution";
+
+      // Check if provider is configured
+      let providerConfigured = false;
+      let providerUrl = "";
+      if (provider === "evolution") {
+        providerUrl = settingsMap.evolution_api_url || "";
+        providerConfigured = !!providerUrl;
+      } else if (provider === "wwebjs") {
+        providerUrl = settingsMap.wwebjs_api_url || "";
+        providerConfigured = !!providerUrl;
+      } else if (provider === "n8n" || provider === "custom") {
+        providerUrl = settingsMap.n8n_webhook_url || settingsMap.custom_send_url || "";
+        providerConfigured = !!providerUrl;
+      }
+
+      // Sessions by provider breakdown
+      const sessionsByProvider: Record<string, { total: number; connected: number }> = {};
+      for (const s of sessions) {
+        const p = s.provider || "evolution";
+        if (!sessionsByProvider[p]) sessionsByProvider[p] = { total: 0, connected: 0 };
+        sessionsByProvider[p].total++;
+        if (s.status === "connected") sessionsByProvider[p].connected++;
+      }
+
       return {
         waSessions: { total, connected },
-        evolutionConfigured: !!(evoRes.data as any)?.value,
-        evolutionUrl: (evoRes.data as any)?.value || "",
+        provider,
+        providerUrl,
+        providerConfigured,
+        sessionsByProvider,
       };
     },
     staleTime: 60_000,
@@ -166,7 +200,7 @@ export function useWaSessions() {
     queryFn: async () => {
       const { data } = await supabase
         .from("wa_sessions" as any)
-        .select("client_id, status, qr_code");
+        .select("client_id, status, qr_code, provider");
       return (data as any[]) || [];
     },
     staleTime: 30_000,
@@ -228,7 +262,6 @@ export function useInboxConversations(clientId: string) {
     staleTime: 10_000,
   });
 
-  // Realtime invalidation
   useEffect(() => {
     const channel = supabase
       .channel(`rq-inbox-${clientId}`)
@@ -345,20 +378,17 @@ export function useDashboardLogs() {
     queryKey: ["dashboardLogs"],
     queryFn: async () => {
       const [messagesRes, alertsRes, escalationsRes] = await Promise.all([
-        // Latest 5 messages with conversation -> customer + client info
         supabase
           .from("wa_messages" as any)
           .select("id, content, sender, created_at, conversation_id")
           .order("created_at", { ascending: false })
           .limit(5),
-        // Latest 3 unread billing alerts
         supabase
           .from("billing_alerts" as any)
           .select("id, message, alert_type, created_at, client_id, is_read")
           .eq("is_read", false)
           .order("created_at", { ascending: false })
           .limit(3),
-        // Active human escalations
         supabase
           .from("wa_conversations" as any)
           .select("id, customer_id, client_id, created_at")
@@ -368,7 +398,6 @@ export function useDashboardLogs() {
 
       const logs: { level: "info" | "warn" | "critical"; message: string; timestamp: string }[] = [];
 
-      // Process messages
       for (const msg of (messagesRes.data as any[]) || []) {
         logs.push({
           level: "info",
@@ -377,7 +406,6 @@ export function useDashboardLogs() {
         });
       }
 
-      // Process billing alerts
       for (const alert of (alertsRes.data as any[]) || []) {
         logs.push({
           level: "warn",
@@ -386,7 +414,6 @@ export function useDashboardLogs() {
         });
       }
 
-      // Process escalations
       for (const esc of (escalationsRes.data as any[]) || []) {
         logs.push({
           level: "critical",
@@ -395,7 +422,6 @@ export function useDashboardLogs() {
         });
       }
 
-      // Sort by timestamp desc
       logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
       return logs;
