@@ -1,99 +1,141 @@
 
 
-# Plan: Zero-Hardcode Architecture — Dynamic Config Engine
+# Plan: Multi-Platform WhatsApp Dashboard — Platform-Agnostic Architecture
 
-## Masalah Inti
+## Ringkasan
 
-Edge functions (`wa-webhook`, `wa-send-message`, `manage-wa-instance`) membaca config dari **Deno env secrets** (`EVOLUTION_API_URL`, `EVOLUTION_API_KEY`), tapi Settings UI menyimpan ke tabel **`platform_settings`**. Akibatnya, mengubah URL/key di dashboard **tidak berpengaruh** — edge functions tetap pakai nilai lama dari secrets.
+Saat ini dashboard hardcoded ke "Evolution API" — label, logic, diagnostics, dan device manager semuanya hanya mengenal satu provider. Plan ini akan membuat seluruh dashboard **platform-agnostic**, sehingga bisa bekerja dengan Evolution API, wa-bridge-lite, Baileys, atau provider WA lain yang akan datang.
 
-```text
-SEKARANG (broken):
-  Settings UI → platform_settings (DB)     ← dashboard baca dari sini
-  Edge Functions → Deno.env.get("SECRET")  ← runtime baca dari sini (berbeda!)
+## Perubahan Database
 
-TARGET:
-  Settings UI → platform_settings (DB) ← SATU sumber kebenaran
-  Edge Functions → baca dari platform_settings dulu, fallback ke env
-  Dashboard → baca dari platform_settings
+### Migration: Tambah kolom `provider` di `wa_sessions`
+```sql
+ALTER TABLE public.wa_sessions 
+  ADD COLUMN IF NOT EXISTS provider text NOT NULL DEFAULT 'evolution';
+COMMENT ON COLUMN public.wa_sessions.provider IS 'WA provider: evolution, wwebjs, baileys, n8n, custom';
 ```
 
-## Perubahan
+## Perubahan File
 
-### 1. Helper Function: `getConfig()` untuk Edge Functions
+### 1. `src/hooks/useAdminData.ts` — Dynamic System Health
 
-Buat helper yang di-copy ke setiap edge function yang butuh config. Logic:
-1. Query `platform_settings` untuk key yang dibutuhkan
-2. Jika ada di DB, pakai nilai DB
-3. Jika tidak ada, fallback ke `Deno.env.get()`
+**`useSystemHealth()`**: Ganti logic yang hanya cek `evolution_api_url` menjadi:
+- Baca `wa_provider` dari `platform_settings` untuk tahu provider aktif
+- Baca URL sesuai provider (`evolution_api_url` atau `wwebjs_api_url`)
+- Return `{ provider, providerUrl, providerConfigured }` alih-alih `evolutionConfigured`
+- Tambah breakdown sessions per provider: `sessionsByProvider: { evolution: {total, connected}, wwebjs: {total, connected} }`
 
-```typescript
-async function getConfig(supabase: any): Promise<Record<string, string>> {
-  const { data } = await supabase.from("platform_settings").select("key, value");
-  const config: Record<string, string> = {};
-  for (const row of data || []) config[row.key] = row.value;
-  return {
-    evolution_api_url: config.evolution_api_url || Deno.env.get("EVOLUTION_API_URL") || "",
-    evolution_api_key: config.evolution_api_key || Deno.env.get("EVOLUTION_API_KEY") || "",
-    wa_webhook_secret: config.wa_webhook_secret || Deno.env.get("WA_WEBHOOK_SECRET") || "",
-    // ... semua config lain
-  };
+### 2. `src/pages/admin/Dashboard.tsx` — Dynamic Control Tower
+
+Perubahan di System Health section:
+- **`EVO-API-GATEWAY`** → rename menjadi **`WA-GATEWAY`** yang menampilkan nama provider aktif secara dinamis (e.g. "EVOLUTION", "WWEBJS", "N8N")
+- Tambah label provider di bawah `WA-SESSIONS` bar: e.g. "2 Evolution, 1 WA Bridge Lite"
+- `criticalResources` message: ganti "Evolution API belum dikonfigurasi" → "WhatsApp provider belum dikonfigurasi"
+- Version string di footer: update ke "V3.0.0 / MULTI-PLATFORM"
+
+### 3. `src/pages/admin/Settings.tsx` — Super Customizable Settings
+
+**Tab "WhatsApp API" → rename "WhatsApp Provider"**:
+
+Tambah di atas form:
+- **Provider Selector** (dropdown): `Evolution API` | `WA Bridge Lite (WWeb.js)` | `Custom/n8n` 
+- Masing-masing provider menampilkan form fields yang berbeda:
+  - **Evolution**: API URL, API Key, Webhook Secret (existing)
+  - **WA Bridge Lite**: API URL, API Token
+  - **Custom/n8n**: Webhook URL (dimana n8n mengirim), Send Message URL, Auth Header
+- Provider active disimpan ke `platform_settings` key `wa_provider`
+- Diagnostics panel adapts per provider:
+  - Evolution: test `/instance/fetchInstances`
+  - WA Bridge Lite: test `/status?token=...`
+  - Custom: test ping ke URL yang dikonfigurasi
+
+**Tab baru "Endpoints & Integration"**:
+- Tampilkan semua endpoint URL (webhook, snapshot) dengan tombol copy
+- Instruksi setup per provider
+- n8n webhook payload template
+
+### 4. `src/pages/admin/DeviceManager.tsx` — Multi-Provider Device Manager
+
+- Tambah **provider badge** di setiap instance card (Evolution / WA Bridge / Custom)
+- **Create dialog**: tambah dropdown pilih provider per instance
+- **Action routing**: `invokeManage` kirim `provider` dalam body, edge function route action ke API yang sesuai
+- **Diagnostics panel**: ganti "Evolution API Aktif" → tampilkan status per provider yang dikonfigurasi
+- Label "Sync dari VPS" → "Sync dari Provider" (generic)
+
+### 5. `src/components/admin/InstanceCard.tsx` — Provider Badge
+
+- Tambah prop `provider` dari session data
+- Tampilkan badge kecil di header: `[EVO]`, `[WWEBJS]`, `[N8N]`
+- QR section: untuk wwebjs, tampilkan link langsung ke `/qr?session=...` sebagai alternatif
+
+### 6. `supabase/functions/manage-wa-instance/index.ts` — Multi-Provider Routing
+
+Tambah provider routing di setiap action:
+```
+function getProviderApi(config, provider) {
+  if (provider === 'wwebjs') return { url: config.wwebjs_api_url, key: config.wwebjs_api_key, type: 'wwebjs' };
+  if (provider === 'custom') return { url: config.custom_wa_url, key: config.custom_wa_key, type: 'custom' };
+  return { url: config.evolution_api_url, key: config.evolution_api_key, type: 'evolution' };
+}
+```
+- **create**: Route ke Evolution `instance/create` atau wa-bridge-lite `POST /session/start`
+- **connect (QR)**: Route ke Evolution `instance/connect` atau wa-bridge-lite `GET /qr?session=...`
+- **status**: Route ke provider-specific status endpoint
+- **restart/logout/delete**: Route accordingly
+- **diagnostics/test-all**: Test semua provider yang dikonfigurasi
+
+### 7. `supabase/functions/wa-webhook/index.ts` — Event Normalization
+
+Tambah layer normalisasi di awal handler:
+```
+function normalizeIncomingEvent(body, headers) {
+  // Detect provider dari header atau body structure
+  if (body.event === 'messages.upsert') return { provider: 'evolution', ... };
+  if (body.type === 'message' && body.session) return { provider: 'wwebjs', ... };
+  if (body.source === 'n8n') return { provider: 'n8n', ... };
+}
+```
+- Normalize message fields: `from`, `body`, `mediaUrl` ke format internal
+- Normalize connection events: `qr`, `connected`, `disconnected`
+- Lookup provider dari `wa_sessions.provider` untuk outgoing routing
+
+### 8. `supabase/functions/wa-send-message/index.ts` — Multi-Provider Send
+
+```
+if (provider === 'wwebjs') {
+  await fetch(`${url}/send?session=${instance}&token=${key}`, { body: { to, text } });
+} else if (provider === 'evolution') {
+  await fetch(`${url}/message/sendText/${instance}`, { headers: { apikey: key }, body: { number, text } });
+} else if (provider === 'custom') {
+  await fetch(customSendUrl, { headers: { Authorization: authHeader }, body: { to, message } });
 }
 ```
 
-### 2. Update Edge Functions (3 file)
+### 9. `supabase/functions/manage-settings/index.ts` — Provider-Aware Test
 
-| File | Perubahan |
-|------|-----------|
-| `supabase/functions/wa-webhook/index.ts` | Ganti semua `Deno.env.get("EVOLUTION_API_URL/KEY")` dengan `getConfig()` result. Config di-fetch 1x per request, di-pass ke helper functions. |
-| `supabase/functions/wa-send-message/index.ts` | Sama — baca URL/key dari DB via `getConfig()` |
-| `supabase/functions/manage-wa-instance/index.ts` | Sama — baca URL/key dari DB via `getConfig()` |
+Update `test-evolution` action → `test-provider`:
+- Accept `provider` param
+- Route test ke endpoint yang sesuai
+- Return unified diagnostics format
 
-### 3. Enhanced Settings UI — Tab "WhatsApp API"
+## Secrets yang Perlu Ditambahkan
 
-Tambahkan di `src/pages/admin/Settings.tsx`:
+User perlu menambahkan via Lovable Cloud Secrets (hanya jika menggunakan provider tersebut):
+- `WWEBJS_API_URL` — URL wa-bridge-lite
+- `WWEBJS_API_KEY` — Token wa-bridge-lite
 
-- **Live Diagnostics panel** setelah "Test Connection":
-  - Tampilkan latency (ms), HTTP status, CORS status
-  - Raw error response (sanitized) untuk debugging
-  - Auto-retry indicator jika request pertama gagal
+## Prioritas Implementasi
 
-- **Connection status badge** yang real-time:
-  - Hijau: connected + latency < 500ms
-  - Kuning: connected tapi latency > 500ms
-  - Merah: unreachable
-
-- Update test handler untuk mengembalikan data diagnostik yang lebih kaya (latency, headers, error detail)
-
-### 4. Update `manage-settings` Edge Function
-
-Tambah action `test-evolution` response yang lebih kaya:
-- `latency_ms`: waktu respons
-- `cors_ok`: boolean (apakah bisa di-fetch dari edge function)
-- `auth_valid`: boolean
-- `error_detail`: pesan error spesifik
-
-### 5. Settings Save → Invalidate Semua Query
-
-Di frontend, setelah save settings berhasil, invalidate semua React Query cache agar semua komponen (Dashboard, Device Manager, dll) langsung fetch ulang dengan config baru.
-
-## File Terdampak
-
-| File | Aksi |
-|------|------|
-| `supabase/functions/wa-webhook/index.ts` | Tambah `getConfig()`, ganti env reads |
-| `supabase/functions/wa-send-message/index.ts` | Tambah `getConfig()`, ganti env reads |
-| `supabase/functions/manage-wa-instance/index.ts` | Tambah `getConfig()`, ganti env reads |
-| `supabase/functions/manage-settings/index.ts` | Perkaya response `test-evolution` |
-| `src/pages/admin/Settings.tsx` | Tambah Live Diagnostics panel, invalidate all queries on save |
+1. Database migration (tambah `provider` column)
+2. Settings UI (provider selector + dynamic form)
+3. Dashboard Control Tower (dynamic labels)
+4. Device Manager + InstanceCard (provider routing + badges)
+5. Edge functions (multi-provider routing)
+6. Webhook normalization layer
 
 ## Yang TIDAK Diubah
-- Database schema (sudah punya `platform_settings`)
-- Auth flow
+- Auth flow, RLS policies
 - Landing page
-- Secrets yang sudah ada (tetap jadi fallback)
-
-## Catatan Arsitektur
-- `platform_settings` sudah dilindungi RLS (admin only)
-- Edge functions pakai service role key untuk query `platform_settings`, jadi aman
-- Fallback ke env secrets memastikan backward compatibility — jika DB kosong, sistem tetap jalan
+- Knowledge Base, Inbox, Monitoring pages
+- Tabel database lain (clients, documents, wa_messages, dll)
 
