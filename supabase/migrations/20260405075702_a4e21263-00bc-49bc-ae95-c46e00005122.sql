@@ -1,0 +1,2 @@
+ALTER TABLE public.wa_sessions ADD COLUMN IF NOT EXISTS provider text NOT NULL DEFAULT 'evolution';
+COMMENT ON COLUMN public.wa_sessions.provider IS 'WA provider: evolution, wwebjs, baileys, n8n, custom';
