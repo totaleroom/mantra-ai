@@ -16,10 +16,15 @@ async function getConfig(supabase: any): Promise<Record<string, string>> {
   const db: Record<string, string> = {};
   for (const row of data || []) db[row.key] = row.value;
   return {
+    wa_provider: db.wa_provider || "evolution",
     evolution_api_url: db.evolution_api_url || Deno.env.get("EVOLUTION_API_URL") || "",
     evolution_api_key: db.evolution_api_key || Deno.env.get("EVOLUTION_API_KEY") || "",
+    wwebjs_api_url: db.wwebjs_api_url || Deno.env.get("WWEBJS_API_URL") || "",
+    wwebjs_api_key: db.wwebjs_api_key || Deno.env.get("WWEBJS_API_KEY") || "",
+    n8n_webhook_url: db.n8n_webhook_url || "",
+    custom_send_url: db.custom_send_url || "",
+    custom_auth_header: db.custom_auth_header || "",
     wa_webhook_secret: db.wa_webhook_secret || Deno.env.get("WA_WEBHOOK_SECRET") || "",
-    // AI config (already was read from DB)
     ai_system_prompt: db.ai_system_prompt || "",
     ai_model: db.ai_model || "",
     ai_temperature: db.ai_temperature || "0.3",
