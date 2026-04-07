@@ -31,7 +31,7 @@ const INDUSTRIES: Industry[] = [
       { sender: "customer", text: "Air Pro dong kak, bisa COD ga ke Jakarta Selatan?" },
       {
         sender: "ai",
-        text: "Bisa banget kak! COD Jakarta Selatan tersedia ✅\n\nOngkir gratis untuk pembelian di atas Rp500.000, jadi kakak FREE ongkir ya! 🎉\n\nEstimasi sampai 1-2 hari kerja. Mau langsung diproses kak?",
+        text: "Bisa banget kak! COD Jakarta Selatan tersedia ✅\n\nOngkir gratis untuk pembelian di atas Rp500.000, jadi kakak FREE ongkir ya! 🎉\n\nEstimasi sampai 1 sampai 2 hari kerja. Mau langsung diproses kak?",
       },
       { sender: "customer", text: "Langsung aja kak, gimana caranya?" },
       {
@@ -129,7 +129,6 @@ const ChatDemo = () => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, []);
 
-  // Reset when switching industry
   const switchIndustry = (index: number) => {
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
     setActiveIndustry(index);
@@ -179,9 +178,6 @@ const ChatDemo = () => {
     <section className="bg-background py-16 md:py-24">
       <div className="container mx-auto px-4">
         <div className="mx-auto mb-8 max-w-2xl text-center">
-          <span className="mb-3 inline-block font-mono text-xs font-semibold uppercase tracking-widest text-primary">
-            Demo Live
-          </span>
           <h2 className="mb-3 text-3xl font-extrabold tracking-tight text-foreground md:text-4xl">
             Bukan Cuma Balas Chat,{" "}
             <span className="text-primary">MANTRA Bisa Closing.</span>
@@ -198,7 +194,7 @@ const ChatDemo = () => {
             <button
               key={industry.id}
               onClick={() => switchIndustry(i)}
-              className={`flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-semibold transition-all ${
+              className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-semibold transition-all ${
                 activeIndustry === i
                   ? "bg-primary text-primary-foreground shadow-md"
                   : "bg-secondary text-muted-foreground hover:bg-secondary/80"
@@ -212,7 +208,7 @@ const ChatDemo = () => {
 
         <div className="mx-auto max-w-md">
           {/* Chat window */}
-          <div className="overflow-hidden rounded-2xl border border-border shadow-lg">
+          <div className="overflow-hidden rounded-lg border border-border shadow-lg">
             {/* Header */}
             <div className="flex items-center gap-3 bg-primary px-4 py-3">
               <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary-foreground/20">
@@ -220,7 +216,7 @@ const ChatDemo = () => {
               </div>
               <div>
                 <p className="text-sm font-semibold text-primary-foreground">{currentIndustry.businessName}</p>
-                <p className="text-xs text-primary-foreground/70">Online • Powered by MANTRA AI</p>
+                <p className="text-xs text-primary-foreground/70">Online · Powered by MANTRA AI</p>
               </div>
             </div>
 
@@ -236,10 +232,10 @@ const ChatDemo = () => {
                   className={`flex ${msg.sender === "customer" ? "justify-end" : "justify-start"} animate-fade-in`}
                 >
                   <div
-                    className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed whitespace-pre-line shadow-sm ${
+                    className={`max-w-[80%] rounded-lg px-4 py-2.5 text-sm leading-relaxed whitespace-pre-line shadow-sm ${
                       msg.sender === "customer"
-                        ? "rounded-br-md bg-primary text-primary-foreground"
-                        : "rounded-bl-md bg-card text-card-foreground border border-border"
+                        ? "rounded-br-sm bg-primary text-primary-foreground"
+                        : "rounded-bl-sm bg-card text-card-foreground border border-border"
                     }`}
                   >
                     {msg.text}
@@ -249,7 +245,7 @@ const ChatDemo = () => {
 
               {isTyping && (
                 <div className="flex justify-start animate-fade-in">
-                  <div className="rounded-2xl rounded-bl-md bg-card text-card-foreground border border-border px-4 py-3 shadow-sm">
+                  <div className="rounded-lg rounded-bl-sm bg-card text-card-foreground border border-border px-4 py-3 shadow-sm">
                     <span className="flex gap-1">
                       <span className="h-2 w-2 rounded-full bg-muted-foreground/50 animate-bounce" style={{ animationDelay: "0ms" }} />
                       <span className="h-2 w-2 rounded-full bg-muted-foreground/50 animate-bounce" style={{ animationDelay: "150ms" }} />
@@ -271,7 +267,7 @@ const ChatDemo = () => {
             )}
             <Badge variant="secondary" className="gap-1.5 px-3 py-1">
               <Bot size={14} />
-              Semua dijawab otomatis — closing, booking, sampai pembayaran
+              Semua dijawab otomatis: closing, booking, sampai pembayaran
             </Badge>
           </div>
         </div>

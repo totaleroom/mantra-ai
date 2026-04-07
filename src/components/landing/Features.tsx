@@ -22,7 +22,7 @@ const features = [
     icon: Database,
     color: "text-accent",
     bg: "bg-accent/10",
-    description: "Pusat data terpadu — stok, pelanggan, pesanan. Semua sinkron otomatis.",
+    description: "Pusat data terpadu: stok, pelanggan, pesanan. Semua sinkron otomatis.",
     bullets: [
       "Dashboard stok real-time",
       "CRM pelanggan terintegrasi",
@@ -37,15 +37,13 @@ const Features = () => {
     <section id="solusi" className="py-16 md:py-24">
       <div className="container mx-auto px-4">
         <div className="mx-auto mb-12 max-w-2xl text-center">
-          <span className="mb-3 inline-block font-mono text-xs font-semibold uppercase tracking-widest text-primary">
-            Peralatan MANTRA
-          </span>
+          <p className="mb-3 text-sm font-semibold text-primary">Peralatan MANTRA</p>
           <h2 className="mb-4 text-3xl font-extrabold tracking-tight text-foreground md:text-4xl">
             AI yang Bekerja Seperti{" "}
             <span className="text-primary">Sales Terbaik Anda</span>
           </h2>
           <p className="text-muted-foreground">
-            Natural, penuh empati, dan punya insting upsell & cross-sell — bukan robot kaku.
+            Natural, penuh empati, dan punya insting upsell & cross-sell. Bukan robot kaku.
           </p>
         </div>
 
@@ -53,10 +51,10 @@ const Features = () => {
           {features.map((f) => (
             <Card key={f.name} className="group overflow-hidden transition-shadow hover:shadow-lg">
               <CardContent className="p-6">
-                <div className={`mb-4 inline-flex h-12 w-12 items-center justify-center rounded-xl ${f.bg}`}>
+                <div className={`mb-4 inline-flex h-12 w-12 items-center justify-center rounded-lg ${f.bg}`}>
                   <f.icon size={24} className={f.color} />
                 </div>
-                <div className="mb-1 font-mono text-xs font-bold uppercase tracking-widest text-muted-foreground">
+                <div className="mb-1 text-xs font-bold uppercase tracking-wide text-muted-foreground">
                   {f.name}
                 </div>
                 <h3 className="mb-2 text-xl font-bold text-foreground">{f.title}</h3>

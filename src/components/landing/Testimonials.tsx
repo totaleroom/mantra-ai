@@ -47,9 +47,6 @@ const Testimonials = () => {
     <section className="bg-card py-16 md:py-24">
       <div className="container mx-auto px-4">
         <div className="mx-auto mb-12 max-w-2xl text-center">
-          <span className="mb-3 inline-block font-mono text-xs font-semibold uppercase tracking-widest text-primary">
-            Testimoni
-          </span>
           <h2 className="mb-4 text-3xl font-extrabold tracking-tight text-foreground md:text-4xl">
             Hasil Nyata,{" "}
             <span className="text-primary">Bukan Janji Kosong</span>
@@ -58,7 +55,7 @@ const Testimonials = () => {
 
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
           {testimonials.map((t) => (
-            <div key={t.name} className="flex flex-col rounded-2xl border border-border bg-background p-5">
+            <div key={t.name} className="flex flex-col rounded-lg border border-border bg-background p-5">
               <div className="mb-3 flex items-center gap-3">
                 <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary font-bold text-primary-foreground">
                   {t.initial}
@@ -69,20 +66,20 @@ const Testimonials = () => {
                 </div>
               </div>
               <p className="flex-1 text-sm leading-relaxed text-muted-foreground">"{t.quote}"</p>
-              <div className="mt-4 rounded-lg bg-primary/5 px-3 py-2 text-center">
-                <p className="font-mono text-sm font-bold text-primary">{t.metric}</p>
+              <div className="mt-4 rounded-md bg-primary/5 px-3 py-2 text-center">
+                <p className="text-sm font-bold text-primary">{t.metric}</p>
               </div>
             </div>
           ))}
         </div>
 
         {/* Stats bar */}
-        <div className="mt-12 grid grid-cols-2 gap-4 md:grid-cols-4">
+        <div className="mt-12 flex flex-wrap items-center justify-center gap-8">
           {stats.map((s) => (
-            <div key={s.label} className="flex items-center justify-center gap-3 rounded-xl border border-border bg-background p-4">
+            <div key={s.label} className="flex items-center gap-3">
               <s.icon size={20} className="text-primary" />
               <div>
-                <p className="font-mono text-xl font-bold text-foreground">{s.value}</p>
+                <p className="text-xl font-bold text-foreground">{s.value}</p>
                 <p className="text-xs text-muted-foreground">{s.label}</p>
               </div>
             </div>

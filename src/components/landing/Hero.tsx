@@ -8,7 +8,7 @@ const Hero = () => {
         <div className="grid items-center gap-12 lg:grid-cols-2">
           {/* Left Content */}
           <div className="max-w-xl">
-            <p className="mb-6 font-mono text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+            <p className="mb-6 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
               Asisten Digital untuk Usaha Anda
             </p>
 
@@ -18,7 +18,7 @@ const Hero = () => {
             </h1>
 
             <p className="mb-8 text-lg leading-relaxed text-muted-foreground">
-              AI yang beneran bisa eksekusi — closing, booking, cek ongkir, terima pembayaran. 
+              AI yang beneran bisa eksekusi: closing, booking, cek ongkir, terima pembayaran. 
               Kualitas setara sales terbaik, kerja 24/7 tanpa libur.
             </p>
 
@@ -37,17 +37,17 @@ const Hero = () => {
 
           {/* Right — Dashboard Mock */}
           <div className="relative">
-            <div className="rounded-2xl border border-border bg-card p-6 shadow-xl">
+            <div className="rounded-lg border border-border bg-card p-6 shadow-xl">
               <div className="mb-4 flex items-center gap-2">
                 <div className="h-3 w-3 rounded-full bg-destructive/60" />
                 <div className="h-3 w-3 rounded-full bg-primary/60" />
                 <div className="h-3 w-3 rounded-full bg-accent/60" />
-                <span className="ml-2 font-mono text-xs text-muted-foreground">MANTRA.RUANG-KENDALI</span>
+                <span className="ml-2 font-mono text-xs text-muted-foreground">Pusat Kontrol</span>
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
                 {/* Before */}
-                <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-4">
+                <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4">
                   <p className="mb-2 text-xs font-semibold uppercase text-destructive">Sebelum MANTRA</p>
                   <ul className="space-y-2 text-sm text-muted-foreground">
                     <li className="flex items-start gap-2">
@@ -63,7 +63,7 @@ const Hero = () => {
                 </div>
 
                 {/* After */}
-                <div className="rounded-xl border border-accent/20 bg-accent/5 p-4">
+                <div className="rounded-lg border border-accent/20 bg-accent/5 p-4">
                   <p className="mb-2 text-xs font-semibold uppercase text-accent">Sesudah MANTRA</p>
                   <ul className="space-y-2 text-sm text-muted-foreground">
                     <li className="flex items-start gap-2">
@@ -81,15 +81,15 @@ const Hero = () => {
 
               {/* Stats */}
               <div className="mt-4 grid grid-cols-3 gap-3">
-                <div className="rounded-lg bg-secondary p-3 text-center">
+                <div className="rounded-md bg-secondary p-3 text-center">
                   <p className="font-mono text-lg font-bold text-foreground">87%</p>
                   <p className="text-xs text-muted-foreground">Chat Otomatis</p>
                 </div>
-                <div className="rounded-lg bg-secondary p-3 text-center">
+                <div className="rounded-md bg-secondary p-3 text-center">
                   <p className="font-mono text-lg font-bold text-foreground">3.2 jam</p>
                   <p className="text-xs text-muted-foreground">Dihemat/Hari</p>
                 </div>
-                <div className="rounded-lg bg-secondary p-3 text-center">
+                <div className="rounded-md bg-secondary p-3 text-center">
                   <p className="font-mono text-lg font-bold text-foreground">↑ 42%</p>
                   <p className="text-xs text-muted-foreground">Konversi</p>
                 </div>
@@ -101,17 +101,17 @@ const Hero = () => {
         {/* Stats Bar */}
         <div className="mt-16 grid grid-cols-2 gap-4 md:grid-cols-4">
           {[
-            { icon: Clock, value: "3-4 jam", label: "Waktu dihemat per hari" },
+            { icon: Clock, value: "3+ jam", label: "Waktu dihemat per hari" },
             { icon: TrendingUp, value: "300%", label: "Peningkatan profit" },
             { icon: Bot, value: "30+", label: "UMKM terlayani" },
             { icon: ArrowRight, value: "<3 dtk", label: "Waktu respons chat" },
           ].map((stat) => (
-            <div key={stat.label} className="flex items-center gap-3 rounded-xl border border-border bg-card p-4">
+            <div key={stat.label} className="flex items-center gap-3 rounded-lg bg-card p-4">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
                 <stat.icon size={20} className="text-primary" />
               </div>
               <div>
-                <p className="font-mono text-xl font-bold text-foreground">{stat.value}</p>
+                <p className="text-xl font-bold text-foreground">{stat.value}</p>
                 <p className="text-xs text-muted-foreground">{stat.label}</p>
               </div>
             </div>
