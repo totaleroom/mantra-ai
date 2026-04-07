@@ -1,141 +1,134 @@
 
 
-# Plan: Multi-Platform WhatsApp Dashboard — Platform-Agnostic Architecture
+# Redesign Landing Page — Hapus "Karakter AI"
 
-## Ringkasan
+## Masalah yang Teridentifikasi
 
-Saat ini dashboard hardcoded ke "Evolution API" — label, logic, diagnostics, dan device manager semuanya hanya mengenal satu provider. Plan ini akan membuat seluruh dashboard **platform-agnostic**, sehingga bisa bekerja dengan Evolution API, wa-bridge-lite, Baileys, atau provider WA lain yang akan datang.
+Setelah review semua 14 komponen landing page, berikut pola yang terasa "AI-generated":
 
-## Perubahan Database
+1. **Radius berlebihan** — `rounded-xl`, `rounded-2xl`, `rounded-3xl`, `rounded-full` di mana-mana. Setiap elemen punya radius besar yang bikin semua terasa "blobby" dan generik.
 
-### Migration: Tambah kolom `provider` di `wa_sessions`
-```sql
-ALTER TABLE public.wa_sessions 
-  ADD COLUMN IF NOT EXISTS provider text NOT NULL DEFAULT 'evolution';
-COMMENT ON COLUMN public.wa_sessions.provider IS 'WA provider: evolution, wwebjs, baileys, n8n, custom';
-```
+2. **Tombol generik** — Semua tombol pakai `rounded-md` default, tidak ada personality. Outline button terlalu plain.
 
-## Perubahan File
+3. **Tanda hubung "-" tersebar** — "MANTRA.RUANG-KENDALI", "1-2 minggu", "3-4 jam", penggunaan em dash "—" di setiap deskripsi. Membuat copy terasa template.
 
-### 1. `src/hooks/useAdminData.ts` — Dynamic System Health
+4. **Layout repetitif** — Setiap section punya structure identik: `span.font-mono.uppercase` (label) → `h2.font-extrabold` → `p.text-muted` → grid cards. Semua section terasa copy-paste.
 
-**`useSystemHealth()`**: Ganti logic yang hanya cek `evolution_api_url` menjadi:
-- Baca `wa_provider` dari `platform_settings` untuk tahu provider aktif
-- Baca URL sesuai provider (`evolution_api_url` atau `wwebjs_api_url`)
-- Return `{ provider, providerUrl, providerConfigured }` alih-alih `evolutionConfigured`
-- Tambah breakdown sessions per provider: `sessionsByProvider: { evolution: {total, connected}, wwebjs: {total, connected} }`
+5. **Font mono berlebihan** — `font-mono` dipakai untuk label, stats, harga, step numbers. Terlalu banyak monospace = terasa robotic.
 
-### 2. `src/pages/admin/Dashboard.tsx` — Dynamic Control Tower
+6. **Section header pattern** — Semua 12 section pakai exact same pattern: colored mono label → bold heading dengan `<span className="text-primary">` → subtitle. Sangat repetitive.
 
-Perubahan di System Health section:
-- **`EVO-API-GATEWAY`** → rename menjadi **`WA-GATEWAY`** yang menampilkan nama provider aktif secara dinamis (e.g. "EVOLUTION", "WWEBJS", "N8N")
-- Tambah label provider di bawah `WA-SESSIONS` bar: e.g. "2 Evolution, 1 WA Bridge Lite"
-- `criticalResources` message: ganti "Evolution API belum dikonfigurasi" → "WhatsApp provider belum dikonfigurasi"
-- Version string di footer: update ke "V3.0.0 / MULTI-PLATFORM"
+## Perubahan yang Akan Dilakukan
 
-### 3. `src/pages/admin/Settings.tsx` — Super Customizable Settings
+### A. Global: Button & Radius (`button.tsx` + `index.css`)
 
-**Tab "WhatsApp API" → rename "WhatsApp Provider"**:
+- Button: ganti `rounded-md` → `rounded-lg` untuk size lg, tambah `font-semibold`, sedikit shadow pada primary button
+- Kurangi radius global `--radius` dari `0.75rem` ke `0.5rem` (lebih sharp, less blobby)
+- Outline button: tambah hover transition yang lebih hidup (scale subtle)
 
-Tambah di atas form:
-- **Provider Selector** (dropdown): `Evolution API` | `WA Bridge Lite (WWeb.js)` | `Custom/n8n` 
-- Masing-masing provider menampilkan form fields yang berbeda:
-  - **Evolution**: API URL, API Key, Webhook Secret (existing)
-  - **WA Bridge Lite**: API URL, API Token
-  - **Custom/n8n**: Webhook URL (dimana n8n mengirim), Send Message URL, Auth Header
-- Provider active disimpan ke `platform_settings` key `wa_provider`
-- Diagnostics panel adapts per provider:
-  - Evolution: test `/instance/fetchInstances`
-  - WA Bridge Lite: test `/status?token=...`
-  - Custom: test ping ke URL yang dikonfigurasi
+### B. Copywriting: Hilangkan tanda hubung berlebihan
 
-**Tab baru "Endpoints & Integration"**:
-- Tampilkan semua endpoint URL (webhook, snapshot) dengan tombol copy
-- Instruksi setup per provider
-- n8n webhook payload template
+Semua file landing — ganti pattern:
+- "MANTRA.RUANG-KENDALI" → "Pusat Kontrol MANTRA"
+- "1-2 minggu" → "1 sampai 2 minggu" (di body text) atau biarkan di badge
+- Hapus em dash "—" yang berlebihan, ganti dengan kalimat yang mengalir natural
+- Kurangi penggunaan titik-koma dan bullet yang terlalu terstruktur
 
-### 4. `src/pages/admin/DeviceManager.tsx` — Multi-Provider Device Manager
+### C. Layout Variation — Break the Pattern
 
-- Tambah **provider badge** di setiap instance card (Evolution / WA Bridge / Custom)
-- **Create dialog**: tambah dropdown pilih provider per instance
-- **Action routing**: `invokeManage` kirim `provider` dalam body, edge function route action ke API yang sesuai
-- **Diagnostics panel**: ganti "Evolution API Aktif" → tampilkan status per provider yang dikonfigurasi
-- Label "Sync dari VPS" → "Sync dari Provider" (generic)
+**Hero.tsx:**
+- Hapus `font-mono` dari tagline
+- Stats bar: hapus border, buat lebih clean dengan divider line saja
+- Dashboard mock: ganti "MANTRA.RUANG-KENDALI" → "Pusat Kontrol"
+- Kurangi `rounded-2xl` card → `rounded-lg`
 
-### 5. `src/components/admin/InstanceCard.tsx` — Provider Badge
+**Problem.tsx:**
+- Hapus `font-mono` dari heading "CS Manusia" / "Cara MANTRA"
+- Cards: `rounded-xl` → `rounded-lg`
 
-- Tambah prop `provider` dari session data
-- Tampilkan badge kecil di header: `[EVO]`, `[WWEBJS]`, `[N8N]`
-- QR section: untuk wwebjs, tampilkan link langsung ke `/qr?session=...` sebagai alternatif
+**Features.tsx:**
+- Hapus `font-mono` dari label name (PENJAGA, INGATAN)
+- Icon container: `rounded-xl` → `rounded-lg`
 
-### 6. `supabase/functions/manage-wa-instance/index.ts` — Multi-Provider Routing
+**HowItWorks.tsx:**
+- Step number: hapus `font-mono`, buat lebih subtle
+- Card: `rounded-2xl` → `rounded-lg`
+- Time badge: `rounded-full` → `rounded-md`
 
-Tambah provider routing di setiap action:
-```
-function getProviderApi(config, provider) {
-  if (provider === 'wwebjs') return { url: config.wwebjs_api_url, key: config.wwebjs_api_key, type: 'wwebjs' };
-  if (provider === 'custom') return { url: config.custom_wa_url, key: config.custom_wa_key, type: 'custom' };
-  return { url: config.evolution_api_url, key: config.evolution_api_key, type: 'evolution' };
-}
-```
-- **create**: Route ke Evolution `instance/create` atau wa-bridge-lite `POST /session/start`
-- **connect (QR)**: Route ke Evolution `instance/connect` atau wa-bridge-lite `GET /qr?session=...`
-- **status**: Route ke provider-specific status endpoint
-- **restart/logout/delete**: Route accordingly
-- **diagnostics/test-all**: Test semua provider yang dikonfigurasi
+**Testimonials.tsx:**
+- Card: `rounded-2xl` → `rounded-lg`
+- Metric box: `rounded-lg` → `rounded-md`
+- Stats: hapus border, buat inline
 
-### 7. `supabase/functions/wa-webhook/index.ts` — Event Normalization
+**About.tsx:**
+- Pain points: `rounded-xl` → `rounded-lg`
+- Values: `rounded-2xl` → `rounded-lg`, icon box `rounded-xl` → `rounded-lg`
+- Stats angka: hapus `font-mono`, pakai `font-sans font-bold`
 
-Tambah layer normalisasi di awal handler:
-```
-function normalizeIncomingEvent(body, headers) {
-  // Detect provider dari header atau body structure
-  if (body.event === 'messages.upsert') return { provider: 'evolution', ... };
-  if (body.type === 'message' && body.session) return { provider: 'wwebjs', ... };
-  if (body.source === 'n8n') return { provider: 'n8n', ... };
-}
-```
-- Normalize message fields: `from`, `body`, `mediaUrl` ke format internal
-- Normalize connection events: `qr`, `connected`, `disconnected`
-- Lookup provider dari `wa_sessions.provider` untuk outgoing routing
+**Pricing.tsx:**
+- Harga: hapus `font-mono`
+- Plan name: hapus `font-mono`, `tracking-widest`
 
-### 8. `supabase/functions/wa-send-message/index.ts` — Multi-Provider Send
+**PaymentScheme.tsx:**
+- Step circle: `rounded-full` tetap (ini natural untuk angka)
+- Cards: `rounded-xl` → `rounded-lg`
 
-```
-if (provider === 'wwebjs') {
-  await fetch(`${url}/send?session=${instance}&token=${key}`, { body: { to, text } });
-} else if (provider === 'evolution') {
-  await fetch(`${url}/message/sendText/${instance}`, { headers: { apikey: key }, body: { number, text } });
-} else if (provider === 'custom') {
-  await fetch(customSendUrl, { headers: { Authorization: authHeader }, body: { to, message } });
-}
-```
+**ROICalculator.tsx & AdminCostCalculator.tsx:**
+- Result cards: `rounded-xl` → `rounded-lg`
+- Angka: hapus `font-mono`
 
-### 9. `supabase/functions/manage-settings/index.ts` — Provider-Aware Test
+**FAQ.tsx:**
+- Tab pills: `rounded-full` → `rounded-lg`
+- Accordion items: `rounded-xl` → `rounded-lg`
 
-Update `test-evolution` action → `test-provider`:
-- Accept `provider` param
-- Route test ke endpoint yang sesuai
-- Return unified diagnostics format
+**FinalCTA.tsx:**
+- Container: `rounded-3xl` → `rounded-xl`
+- Badge pills: `rounded-full` → `rounded-lg`
 
-## Secrets yang Perlu Ditambahkan
+**ChatDemo.tsx:**
+- Tab pills: `rounded-full` → `rounded-lg`
 
-User perlu menambahkan via Lovable Cloud Secrets (hanya jika menggunakan provider tersebut):
-- `WWEBJS_API_URL` — URL wa-bridge-lite
-- `WWEBJS_API_KEY` — Token wa-bridge-lite
+**Footer.tsx:**
+- Minimal changes (sudah cukup clean)
 
-## Prioritas Implementasi
+### D. Section Headers — Add Variation
 
-1. Database migration (tambah `provider` column)
-2. Settings UI (provider selector + dynamic form)
-3. Dashboard Control Tower (dynamic labels)
-4. Device Manager + InstanceCard (provider routing + badges)
-5. Edge functions (multi-provider routing)
-6. Webhook normalization layer
+Tidak semua section butuh `span.font-mono.uppercase` label. Variasi:
+- Beberapa section: hapus label, langsung heading
+- Beberapa section: label tanpa `font-mono`, pakai `font-sans text-primary text-sm font-semibold`
+- Buat setiap section terasa punya "suara" sendiri
+
+### E. Kurangi font-mono
+
+`font-mono` hanya dipakai untuk:
+- Harga (angka besar)
+- Dashboard mock (karena konteks teknis)
+- Selebihnya diganti `font-sans`
+
+## File Terdampak (14 file)
+
+| File | Aksi |
+|------|------|
+| `src/index.css` | `--radius: 0.5rem` |
+| `src/components/ui/button.tsx` | Tambah shadow, font-semibold |
+| `src/components/landing/Hero.tsx` | Radius, copy, hapus font-mono |
+| `src/components/landing/Problem.tsx` | Radius, hapus font-mono |
+| `src/components/landing/Features.tsx` | Radius, hapus font-mono label |
+| `src/components/landing/HowItWorks.tsx` | Radius, step style |
+| `src/components/landing/Testimonials.tsx` | Radius, hapus font-mono stats |
+| `src/components/landing/About.tsx` | Radius, hapus font-mono stats |
+| `src/components/landing/Pricing.tsx` | Hapus font-mono harga/label |
+| `src/components/landing/PaymentScheme.tsx` | Radius |
+| `src/components/landing/ROICalculator.tsx` | Radius, hapus font-mono |
+| `src/components/landing/AdminCostCalculator.tsx` | Radius, hapus font-mono |
+| `src/components/landing/FAQ.tsx` | Radius tabs & accordion |
+| `src/components/landing/FinalCTA.tsx` | Radius, badge pills |
+| `src/components/landing/ChatDemo.tsx` | Radius tabs |
 
 ## Yang TIDAK Diubah
-- Auth flow, RLS policies
-- Landing page
-- Knowledge Base, Inbox, Monitoring pages
-- Tabel database lain (clients, documents, wa_messages, dll)
+- Warna/tema (sudah bagus)
+- Konten/data (pricing, testimonial, FAQ content)
+- Struktur halaman (urutan section)
+- Dashboard admin
+- ChatDemo message bubbles (natural untuk chat UI)
 
