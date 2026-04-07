@@ -8,11 +8,9 @@ const Hero = () => {
         <div className="grid items-center gap-12 lg:grid-cols-2">
           {/* Left Content */}
           <div className="max-w-xl">
-            <div className="mb-6 inline-block rounded-full border border-border bg-card px-4 py-1.5">
-              <span className="font-mono text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                Asisten Digital untuk Usaha Anda
-              </span>
-            </div>
+            <p className="mb-6 font-mono text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+              Asisten Digital untuk Usaha Anda
+            </p>
 
             <h1 className="mb-6 text-4xl font-extrabold leading-[1.1] tracking-tight text-foreground md:text-5xl lg:text-6xl">
               Bukan Cuma Balas Chat.{" "}
