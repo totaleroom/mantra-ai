@@ -28,9 +28,6 @@ const AdminCostCalculator = () => {
     <section className="bg-card py-16 md:py-24">
       <div className="container mx-auto px-4">
         <div className="mx-auto mb-12 max-w-2xl text-center">
-          <span className="mb-3 inline-block font-mono text-xs font-semibold uppercase tracking-widest text-primary">
-            Perbandingan Biaya
-          </span>
           <h2 className="mb-4 text-3xl font-extrabold tracking-tight text-foreground md:text-4xl">
             Hitung Sendiri Penghematannya
           </h2>
@@ -45,7 +42,7 @@ const AdminCostCalculator = () => {
             <button
               key={city.name}
               onClick={() => setSelectedCity(i)}
-              className={`rounded-full px-4 py-2 text-sm font-medium transition-colors ${
+              className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
                 selectedCity === i
                   ? "bg-primary text-primary-foreground"
                   : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
@@ -61,7 +58,7 @@ const AdminCostCalculator = () => {
           <div className="mb-8">
             <div className="mb-2 flex items-center justify-between">
               <span className="text-sm font-medium text-foreground">Jumlah Admin</span>
-              <span className="font-mono text-lg font-bold text-primary">{adminCount[0]} orang</span>
+              <span className="text-lg font-bold text-primary">{adminCount[0]} orang</span>
             </div>
             <Slider value={adminCount} onValueChange={setAdminCount} min={1} max={10} step={1} aria-label="Jumlah admin" />
           </div>
@@ -74,7 +71,7 @@ const AdminCostCalculator = () => {
                   <Building2 size={18} className="text-destructive" />
                   <span className="text-sm font-semibold text-destructive">Biaya Admin Manual</span>
                 </div>
-                <p className="font-mono text-3xl font-bold text-foreground">{formatRp(adminCost)}</p>
+                <p className="text-3xl font-bold text-foreground">{formatRp(adminCost)}</p>
                 <p className="mt-1 text-xs text-muted-foreground">
                   {adminCount[0]} admin × UMK {cities[selectedCity].name} /bulan
                 </p>
@@ -87,16 +84,16 @@ const AdminCostCalculator = () => {
                   <TrendingDown size={18} className="text-accent" />
                   <span className="text-sm font-semibold text-accent">Biaya MANTRA AI</span>
                 </div>
-                <p className="font-mono text-3xl font-bold text-foreground">{formatRp(MANTRA_COST)}</p>
+                <p className="text-3xl font-bold text-foreground">{formatRp(MANTRA_COST)}</p>
                 <p className="mt-1 text-xs text-muted-foreground">Per bulan, sudah termasuk semua fitur</p>
               </CardContent>
             </Card>
           </div>
 
           {/* Savings */}
-          <div className="mt-6 rounded-xl border border-primary/20 bg-primary/5 p-6 text-center">
+          <div className="mt-6 rounded-lg border border-primary/20 bg-primary/5 p-6 text-center">
             <p className="text-sm font-medium text-muted-foreground">Anda hemat hingga</p>
-            <p className="mt-1 font-mono text-4xl font-extrabold text-primary">{formatRp(savings)}</p>
+            <p className="mt-1 text-4xl font-extrabold text-primary">{formatRp(savings)}</p>
             <p className="mt-1 text-sm text-muted-foreground">per bulan</p>
           </div>
         </div>

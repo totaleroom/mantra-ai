@@ -4,7 +4,7 @@ import { Card, CardContent } from "@/components/ui/card";
 
 const plans = [
   {
-    name: "STARTER",
+    name: "Starter",
     price: 250_000,
     setup: 2_000_000,
     target: "Cocok untuk usaha baru mulai go-digital",
@@ -19,7 +19,7 @@ const plans = [
     ],
   },
   {
-    name: "GROWTH",
+    name: "Growth",
     price: 350_000,
     setup: 3_000_000,
     target: "Paling cocok untuk UMKM yang ingin scale up",
@@ -43,9 +43,6 @@ const Pricing = () => {
     <section id="harga" className="py-16 md:py-24">
       <div className="container mx-auto px-4">
         <div className="mx-auto mb-10 max-w-2xl text-center">
-          <span className="mb-3 inline-block font-mono text-xs font-semibold uppercase tracking-widest text-primary">
-            Harga
-          </span>
           <h2 className="mb-4 text-3xl font-extrabold tracking-tight text-foreground md:text-4xl">
             Investasi untuk Bisnis Anda
           </h2>
@@ -65,19 +62,19 @@ const Pricing = () => {
                 </div>
               )}
               <CardContent className="p-6">
-                <h3 className="font-mono text-sm font-bold uppercase tracking-widest text-muted-foreground">
+                <h3 className="text-sm font-bold uppercase tracking-wide text-muted-foreground">
                   {plan.name}
                 </h3>
 
                 <div className="mt-3 flex items-baseline gap-1">
-                  <span className="font-mono text-4xl font-extrabold text-foreground">
+                  <span className="text-4xl font-extrabold text-foreground">
                     {formatRp(plan.price)}
                   </span>
                   <span className="text-sm text-muted-foreground">/bulan</span>
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">+ Setup {formatRp(plan.setup)} (sekali bayar)</p>
 
-                <p className="mt-4 rounded-lg bg-secondary px-3 py-2 text-xs font-medium text-muted-foreground">
+                <p className="mt-4 rounded-md bg-secondary px-3 py-2 text-xs font-medium text-muted-foreground">
                   {plan.target}
                 </p>
 
