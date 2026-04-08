@@ -18,7 +18,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Switch } from "@/components/ui/switch";
-import { Loader2, Plus, Trash2, TestTube, Save, Copy, CheckCircle, ArrowRight, Brain, MessageSquare, Database, Activity, Wifi, WifiOff, Clock, Link2 } from "lucide-react";
+import { Loader2, Plus, Trash2, TestTube, Save, Copy, CheckCircle, ArrowRight, Brain, MessageSquare, Database, Activity, Wifi, WifiOff, Clock, Link2, Rocket, BookOpen, Smartphone } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSettings, useAdminUsers } from "@/hooks/useAdminData";
@@ -190,15 +190,14 @@ export default function Settings() {
   const getConnectionBadge = () => {
     if (!diagnostics) return null;
     if (diagnostics.success && diagnostics.latency_ms < 500) {
-      return <Badge className="bg-green-500/20 text-green-400 border-green-500/30 gap-1"><Wifi className="h-3 w-3" /> Connected ({diagnostics.latency_ms}ms)</Badge>;
+      return <Badge className="bg-accent/20 text-accent border-accent/30 gap-1"><Wifi className="h-3 w-3" /> Connected ({diagnostics.latency_ms}ms)</Badge>;
     }
     if (diagnostics.success && diagnostics.latency_ms >= 500) {
-      return <Badge className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30 gap-1"><Clock className="h-3 w-3" /> Slow ({diagnostics.latency_ms}ms)</Badge>;
+      return <Badge className="bg-yellow-500/20 text-yellow-600 border-yellow-500/30 gap-1"><Clock className="h-3 w-3" /> Slow ({diagnostics.latency_ms}ms)</Badge>;
     }
     return <Badge variant="destructive" className="gap-1"><WifiOff className="h-3 w-3" /> Unreachable</Badge>;
   };
 
-  // Build save payload for provider tab
   const getProviderSavePayload = (): Record<string, string> => {
     const base: Record<string, string> = { wa_provider: activeProvider, wa_webhook_secret: settings.wa_webhook_secret || "" };
     if (activeProvider === "evolution") {
@@ -227,19 +226,43 @@ export default function Settings() {
     <div className="space-y-6">
       <h1 className="text-2xl font-bold text-foreground">Settings</h1>
 
+      {/* Quick Start Guide */}
+      <div className="glass-card rounded-xl p-5 border-primary/20">
+        <div className="flex items-center gap-2 mb-3">
+          <Rocket className="h-4 w-4 text-primary" />
+          <h3 className="text-sm font-semibold text-foreground">Panduan Cepat</h3>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-3">
+          {[
+            { icon: Smartphone, step: "1", title: "Pilih & Konfigurasi WA Provider", tab: "whatsapp" },
+            { icon: BookOpen, step: "2", title: "Upload Knowledge Base", tab: "knowledge" },
+            { icon: Brain, step: "3", title: "Atur AI & System Prompt", tab: "ai" },
+          ].map((s) => (
+            <div key={s.step} className="flex items-center gap-3 rounded-lg bg-muted/50 p-3">
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary">
+                {s.step}
+              </div>
+              <div>
+                <p className="text-xs font-medium text-foreground">{s.title}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       <Tabs defaultValue="admins">
-        <TabsList className="mb-4 flex-wrap">
-          <TabsTrigger value="admins">Admin Users</TabsTrigger>
-          <TabsTrigger value="whatsapp">WhatsApp Provider</TabsTrigger>
-          <TabsTrigger value="ai">AI Configuration</TabsTrigger>
-          <TabsTrigger value="safety">Safety & Limits</TabsTrigger>
-          <TabsTrigger value="endpoints">Endpoints & Integration</TabsTrigger>
+        <TabsList className="mb-4 flex-wrap bg-muted/50 p-1 rounded-lg">
+          <TabsTrigger value="admins" className="rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">Admin Users</TabsTrigger>
+          <TabsTrigger value="whatsapp" className="rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">WhatsApp Provider</TabsTrigger>
+          <TabsTrigger value="ai" className="rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">AI Configuration</TabsTrigger>
+          <TabsTrigger value="safety" className="rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">Safety & Limits</TabsTrigger>
+          <TabsTrigger value="endpoints" className="rounded-md data-[state=active]:bg-background data-[state=active]:shadow-sm">Endpoints</TabsTrigger>
         </TabsList>
 
         {/* Tab 1: Admin Users */}
         <TabsContent value="admins">
-          <div className="rounded-lg border border-border bg-card">
-            <div className="flex items-center justify-between p-4 border-b border-border">
+          <div className="glass-card rounded-xl overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-border/50">
               <div>
                 <h3 className="text-sm font-semibold text-foreground">Admin Users</h3>
                 <p className="text-xs text-muted-foreground">Kelola akun admin yang bisa mengakses dashboard.</p>
@@ -309,7 +332,7 @@ export default function Settings() {
 
         {/* Tab 2: WhatsApp Provider */}
         <TabsContent value="whatsapp">
-          <div className="rounded-lg border border-border bg-card p-6 space-y-6">
+          <div className="glass-card rounded-xl p-6 space-y-6">
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="text-sm font-semibold text-foreground mb-1">WhatsApp Provider</h3>
@@ -319,7 +342,6 @@ export default function Settings() {
             </div>
             <Separator />
 
-            {/* Provider Selector */}
             <div className="space-y-2">
               <Label>Active Provider</Label>
               <Select value={activeProvider} onValueChange={(v) => updateSetting("wa_provider", v)}>
@@ -339,7 +361,6 @@ export default function Settings() {
 
             <Separator />
 
-            {/* Dynamic Fields per Provider */}
             {activeProvider === "evolution" && (
               <div className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -367,7 +388,7 @@ export default function Settings() {
                     <Input type="password" value={settings.wwebjs_api_key || ""} onChange={(e) => updateSetting("wwebjs_api_key", e.target.value)} placeholder="Token wa-bridge-lite" />
                   </div>
                 </div>
-                <p className="text-xs text-muted-foreground">wa-bridge-lite menggunakan endpoint: <code>/send?session=name&token=key</code></p>
+                <p className="text-xs text-muted-foreground">wa-bridge-lite menggunakan endpoint: <code className="bg-muted px-1 py-0.5 rounded">/send?session=name&token=key</code></p>
               </div>
             )}
 
@@ -399,19 +420,17 @@ export default function Settings() {
 
             <Separator />
 
-            {/* Webhook URL display */}
-            <div className="rounded-lg border border-border p-4 bg-muted/50">
+            <div className="rounded-lg bg-muted/30 p-4">
               <Label className="text-sm font-medium">Webhook URL</Label>
               <p className="text-xs text-muted-foreground mt-1 mb-2">Set URL ini di provider sebagai webhook callback.</p>
               <div className="flex items-center gap-2">
-                <code className="flex-1 text-xs bg-background rounded px-3 py-2 border border-border break-all">{webhookUrl}</code>
+                <code className="flex-1 text-xs bg-background rounded-lg px-3 py-2 border border-border/50 break-all">{webhookUrl}</code>
                 <Button variant="outline" size="icon" onClick={() => copyToClipboard(webhookUrl, "webhook")}>
-                  {copied === "webhook" ? <CheckCircle className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                  {copied === "webhook" ? <CheckCircle className="h-4 w-4 text-accent" /> : <Copy className="h-4 w-4" />}
                 </Button>
               </div>
             </div>
 
-            {/* Test & Diagnostics */}
             <div className="space-y-3">
               <div className="flex items-center gap-3">
                 <Button variant="outline" onClick={handleTestProvider} disabled={testing}>
@@ -421,31 +440,31 @@ export default function Settings() {
               </div>
 
               {diagnostics && (
-                <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
+                <div className="rounded-xl bg-muted/30 p-4 space-y-3">
                   <div className="flex items-center gap-2">
                     <Activity className="h-4 w-4 text-primary" />
                     <span className="text-sm font-semibold text-foreground">Live Diagnostics</span>
                   </div>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    <div className="rounded border border-border bg-background p-3 text-center">
+                    <div className="rounded-lg border border-border/50 bg-background/50 p-3 text-center">
                       <p className="text-xs text-muted-foreground">Latency</p>
-                      <p className={`text-lg font-bold ${diagnostics.latency_ms < 500 ? "text-green-400" : diagnostics.latency_ms < 1500 ? "text-yellow-400" : "text-destructive"}`}>
+                      <p className={`text-lg font-bold ${diagnostics.latency_ms < 500 ? "text-accent" : diagnostics.latency_ms < 1500 ? "text-yellow-500" : "text-destructive"}`}>
                         {diagnostics.latency_ms}ms
                       </p>
                     </div>
-                    <div className="rounded border border-border bg-background p-3 text-center">
+                    <div className="rounded-lg border border-border/50 bg-background/50 p-3 text-center">
                       <p className="text-xs text-muted-foreground">Reachable</p>
-                      <p className={`text-lg font-bold ${diagnostics.reachable ? "text-green-400" : "text-destructive"}`}>
+                      <p className={`text-lg font-bold ${diagnostics.reachable ? "text-accent" : "text-destructive"}`}>
                         {diagnostics.reachable ? "Yes" : "No"}
                       </p>
                     </div>
-                    <div className="rounded border border-border bg-background p-3 text-center">
+                    <div className="rounded-lg border border-border/50 bg-background/50 p-3 text-center">
                       <p className="text-xs text-muted-foreground">Auth Valid</p>
-                      <p className={`text-lg font-bold ${diagnostics.auth_valid ? "text-green-400" : "text-destructive"}`}>
+                      <p className={`text-lg font-bold ${diagnostics.auth_valid ? "text-accent" : "text-destructive"}`}>
                         {diagnostics.auth_valid ? "Yes" : "No"}
                       </p>
                     </div>
-                    <div className="rounded border border-border bg-background p-3 text-center">
+                    <div className="rounded-lg border border-border/50 bg-background/50 p-3 text-center">
                       <p className="text-xs text-muted-foreground">Instances</p>
                       <p className="text-lg font-bold text-foreground">{diagnostics.instances}</p>
                     </div>
@@ -456,7 +475,7 @@ export default function Settings() {
                     </div>
                   )}
                   {diagnostics.error_detail && (
-                    <div className="rounded border border-destructive/30 bg-destructive/10 p-3">
+                    <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3">
                       <p className="text-xs font-medium text-destructive mb-1">Error Detail:</p>
                       <code className="text-xs text-destructive/80 break-all">{diagnostics.error_detail}</code>
                     </div>
@@ -474,7 +493,7 @@ export default function Settings() {
 
         {/* Tab 3: AI Configuration */}
         <TabsContent value="ai">
-          <div className="rounded-lg border border-border bg-card p-6 space-y-6">
+          <div className="glass-card rounded-xl p-6 space-y-6">
             <div>
               <h3 className="text-sm font-semibold text-foreground mb-1">AI Configuration</h3>
               <p className="text-xs text-muted-foreground">Konfigurasi model AI dan system prompt untuk chatbot.</p>
@@ -541,20 +560,20 @@ export default function Settings() {
 
             <div className="space-y-1">
               <h4 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                <Brain className="h-4 w-4" /> AI Behavior Pipeline
+                <Brain className="h-4 w-4 text-primary" /> AI Behavior Pipeline
               </h4>
               <p className="text-xs text-muted-foreground">Kontrol perilaku AI saat merespon pesan masuk.</p>
             </div>
 
-            <div className="rounded-lg border border-border bg-muted/30 p-4">
-              <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground flex-wrap">
-                <span className="px-2 py-1 rounded border border-border bg-background">Pesan Masuk</span>
+            <div className="rounded-lg bg-muted/30 p-4">
+              <div className="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
+                <span className="px-2 py-1 rounded-lg border border-border/50 bg-background">Pesan Masuk</span>
                 <ArrowRight className="h-3 w-3 shrink-0" />
-                <span className="px-2 py-1 rounded border border-border bg-background">Cek RAG Context</span>
+                <span className="px-2 py-1 rounded-lg border border-border/50 bg-background">Cek RAG Context</span>
                 <ArrowRight className="h-3 w-3 shrink-0" />
-                <span className="px-2 py-1 rounded border border-primary/30 bg-primary/10 text-primary">Ada Context?</span>
+                <span className="px-2 py-1 rounded-lg border border-primary/30 bg-primary/10 text-primary font-medium">Ada Context?</span>
                 <ArrowRight className="h-3 w-3 shrink-0" />
-                <span className="px-2 py-1 rounded border border-border bg-background">
+                <span className="px-2 py-1 rounded-lg border border-border/50 bg-background">
                   {(settings.no_rag_action || "escalate") === "escalate" ? "Eskalasi" : (settings.no_rag_action || "escalate") === "answer_without" ? "Jawab Tanpa Context" : "Pesan Custom"}
                 </span>
               </div>
@@ -608,7 +627,7 @@ export default function Settings() {
 
             <div className="space-y-1">
               <h4 className="text-sm font-semibold text-foreground flex items-center gap-2">
-                <Database className="h-4 w-4" /> Context & Memory
+                <Database className="h-4 w-4 text-primary" /> Context & Memory
               </h4>
               <p className="text-xs text-muted-foreground">Atur seberapa banyak konteks yang dikirim ke AI.</p>
             </div>
@@ -633,7 +652,7 @@ export default function Settings() {
               </div>
             </div>
 
-            <div className="flex items-center justify-between rounded-lg border border-border p-4">
+            <div className="flex items-center justify-between rounded-lg bg-muted/30 p-4">
               <div className="space-y-0.5">
                 <Label>Sector Detection (Multi-Role RAG)</Label>
                 <p className="text-xs text-muted-foreground">Deteksi sektor WAREHOUSE/OWNER untuk pencarian dokumen yang lebih tepat.</p>
@@ -666,7 +685,7 @@ export default function Settings() {
 
         {/* Tab 4: Safety & Limits */}
         <TabsContent value="safety">
-          <div className="rounded-lg border border-border bg-card p-6 space-y-6">
+          <div className="glass-card rounded-xl p-6 space-y-6">
             <div>
               <h3 className="text-sm font-semibold text-foreground mb-1">Safety & Limits</h3>
               <p className="text-xs text-muted-foreground">Pengaturan default untuk client baru dan anti-ban.</p>
@@ -702,44 +721,44 @@ export default function Settings() {
 
         {/* Tab 5: Endpoints & Integration */}
         <TabsContent value="endpoints">
-          <div className="rounded-lg border border-border bg-card p-6 space-y-6">
+          <div className="glass-card rounded-xl p-6 space-y-6">
             <div>
               <h3 className="text-sm font-semibold text-foreground mb-1 flex items-center gap-2">
-                <Link2 className="h-4 w-4" /> Endpoints & Integration
+                <Link2 className="h-4 w-4 text-primary" /> Endpoints & Integration
               </h3>
               <p className="text-xs text-muted-foreground">URL endpoint untuk integrasi eksternal (n8n, AstrBot, wa-bridge-lite, dll).</p>
             </div>
             <Separator />
 
             <div className="space-y-4">
-              <div className="rounded-lg border border-border p-4 space-y-2">
+              <div className="rounded-lg bg-muted/30 p-4 space-y-2">
                 <Label className="text-sm font-medium">Webhook URL (untuk provider WA)</Label>
                 <p className="text-xs text-muted-foreground">Set URL ini di wa-bridge-lite / Evolution API sebagai callback.</p>
                 <div className="flex items-center gap-2">
-                  <code className="flex-1 text-xs bg-background rounded px-3 py-2 border border-border break-all">{webhookUrl}</code>
+                  <code className="flex-1 text-xs bg-background rounded-lg px-3 py-2 border border-border/50 break-all">{webhookUrl}</code>
                   <Button variant="outline" size="icon" onClick={() => copyToClipboard(webhookUrl, "wh")}>
-                    {copied === "wh" ? <CheckCircle className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                    {copied === "wh" ? <CheckCircle className="h-4 w-4 text-accent" /> : <Copy className="h-4 w-4" />}
                   </Button>
                 </div>
               </div>
 
-              <div className="rounded-lg border border-border p-4 space-y-2">
+              <div className="rounded-lg bg-muted/30 p-4 space-y-2">
                 <Label className="text-sm font-medium">System Snapshot URL (untuk AstrBot)</Label>
                 <p className="text-xs text-muted-foreground">AstrBot bisa memanggil endpoint ini untuk membaca kondisi sistem.</p>
                 <div className="flex items-center gap-2">
-                  <code className="flex-1 text-xs bg-background rounded px-3 py-2 border border-border break-all">{snapshotUrl}</code>
+                  <code className="flex-1 text-xs bg-background rounded-lg px-3 py-2 border border-border/50 break-all">{snapshotUrl}</code>
                   <Button variant="outline" size="icon" onClick={() => copyToClipboard(snapshotUrl, "snap")}>
-                    {copied === "snap" ? <CheckCircle className="h-4 w-4 text-green-500" /> : <Copy className="h-4 w-4" />}
+                    {copied === "snap" ? <CheckCircle className="h-4 w-4 text-accent" /> : <Copy className="h-4 w-4" />}
                   </Button>
                 </div>
               </div>
 
               <Separator />
 
-              <div className="rounded-lg border border-border p-4 space-y-3 bg-muted/30">
+              <div className="rounded-lg bg-muted/30 p-4 space-y-3">
                 <Label className="text-sm font-medium">n8n Webhook Payload Template</Label>
                 <p className="text-xs text-muted-foreground">Format payload yang dikirim wa-bridge-lite ke n8n webhook:</p>
-                <pre className="text-xs bg-background rounded px-4 py-3 border border-border overflow-x-auto font-mono">
+                <pre className="text-xs bg-background rounded-lg px-4 py-3 border border-border/50 overflow-x-auto font-mono">
 {`{
   "type": "message",
   "session": "instance_name",
@@ -750,10 +769,10 @@ export default function Settings() {
                 </pre>
               </div>
 
-              <div className="rounded-lg border border-border p-4 space-y-3 bg-muted/30">
+              <div className="rounded-lg bg-muted/30 p-4 space-y-3">
                 <Label className="text-sm font-medium">n8n → Database Logging</Label>
                 <p className="text-xs text-muted-foreground">n8n bisa log pesan ke database via REST API:</p>
-                <pre className="text-xs bg-background rounded px-4 py-3 border border-border overflow-x-auto font-mono">
+                <pre className="text-xs bg-background rounded-lg px-4 py-3 border border-border/50 overflow-x-auto font-mono">
 {`POST ${import.meta.env.VITE_SUPABASE_URL}/rest/v1/wa_messages
 Headers:
   apikey: <anon key>

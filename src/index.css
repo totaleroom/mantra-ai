@@ -98,14 +98,34 @@
   }
 }
 
-/* Dashboard NEURAL OS utilities */
-.dot-matrix-text {
-  font-family: "JetBrains Mono", monospace;
-  letter-spacing: -0.05em;
+/* ── Premium utility classes ── */
+.glass-card {
+  @apply bg-card/60 backdrop-blur-xl border border-border/50;
+  box-shadow: 0 8px 32px -8px hsl(var(--foreground) / 0.06),
+              inset 0 1px 0 hsl(0 0% 100% / 0.06);
 }
 
+.gradient-text {
+  @apply bg-clip-text text-transparent;
+  background-image: linear-gradient(135deg, hsl(var(--primary)), hsl(24 95% 62%));
+}
+
+.glow-primary {
+  box-shadow: 0 0 24px -4px hsl(var(--primary) / 0.35),
+              0 4px 16px -4px hsl(var(--primary) / 0.2);
+}
+
+.section-gradient {
+  background: radial-gradient(ellipse 80% 60% at 50% 0%, hsl(var(--primary) / 0.04) 0%, transparent 70%);
+}
+
+.section-gradient-bottom {
+  background: radial-gradient(ellipse 80% 60% at 50% 100%, hsl(var(--primary) / 0.04) 0%, transparent 70%);
+}
+
+/* Dashboard utilities */
 .shadow-soft {
-  box-shadow: 0 20px 40px -10px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 4px 24px -6px hsl(var(--foreground) / 0.08);
 }
 
 .dashboard-grid {
@@ -129,4 +149,18 @@
 .custom-scrollbar::-webkit-scrollbar-thumb {
   background: currentColor;
   opacity: 0.3;
+  border-radius: 2px;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+.animate-float-delayed {
+  animation: float 6s ease-in-out 3s infinite;
 }

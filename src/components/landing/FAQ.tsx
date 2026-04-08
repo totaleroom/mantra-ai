@@ -85,7 +85,7 @@ const FAQ = () => {
   const [activeTab, setActiveTab] = useState(0);
 
   return (
-    <section id="faq" className="bg-card py-16 md:py-24">
+    <section id="faq" className="section-gradient py-16 md:py-24">
       <div className="container mx-auto px-4">
         <div className="mx-auto mb-12 max-w-2xl text-center">
           <h2 className="mb-4 text-3xl font-extrabold tracking-tight text-foreground md:text-4xl">
@@ -103,9 +103,9 @@ const FAQ = () => {
               <button
                 key={cat.label}
                 onClick={() => setActiveTab(i)}
-                className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+                className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all ${
                   activeTab === i
-                    ? "bg-primary text-primary-foreground"
+                    ? "bg-gradient-to-r from-primary to-primary/80 text-primary-foreground shadow-md"
                     : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
                 }`}
               >
@@ -117,7 +117,7 @@ const FAQ = () => {
 
           <Accordion type="single" collapsible className="space-y-2">
             {categories[activeTab].questions.map((faq, i) => (
-              <AccordionItem key={i} value={`faq-${i}`} className="rounded-lg border border-border bg-background px-4">
+              <AccordionItem key={i} value={`faq-${i}`} className="glass-card rounded-lg px-4">
                 <AccordionTrigger className="text-left text-sm font-semibold text-foreground hover:no-underline">
                   {faq.q}
                 </AccordionTrigger>

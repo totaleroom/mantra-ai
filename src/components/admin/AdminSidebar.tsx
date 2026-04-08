@@ -39,8 +39,8 @@ export default function AdminSidebar() {
                     <NavLink
                       to={item.url}
                       end={item.exact}
-                      className="hover:bg-sidebar-accent"
-                      activeClassName="bg-sidebar-accent text-sidebar-accent-foreground font-medium"
+                      className="relative hover:bg-sidebar-accent rounded-lg transition-all"
+                      activeClassName="bg-sidebar-accent text-sidebar-accent-foreground font-medium before:absolute before:left-0 before:top-1/2 before:-translate-y-1/2 before:h-5 before:w-0.5 before:rounded-full before:bg-primary"
                     >
                       <item.icon className="mr-2 h-4 w-4" />
                       <span className="flex-1">{item.title}</span>

@@ -2,7 +2,7 @@ import { CreditCard, Wallet, Building } from "lucide-react";
 
 const PaymentScheme = () => {
   return (
-    <section className="bg-card py-16 md:py-24">
+    <section className="py-16 md:py-24">
       <div className="container mx-auto px-4">
         <div className="mx-auto mb-12 max-w-2xl text-center">
           <p className="mb-3 text-sm font-semibold text-primary">Skema Pembayaran</p>
@@ -19,8 +19,8 @@ const PaymentScheme = () => {
               { step: "2", title: "Pelunasan 50%", desc: "Lunasi sisa 50% setelah sistem selesai dan disetujui." },
               { step: "3", title: "Biaya Bulanan", desc: "Langganan bulanan dimulai setelah go-live." },
             ].map((s) => (
-              <div key={s.step} className="rounded-lg border border-border bg-background p-5 text-center">
-                <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-primary text-lg font-bold text-primary-foreground">
+              <div key={s.step} className="glass-card rounded-xl p-5 text-center transition-all hover:shadow-lg">
+                <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-primary to-primary/70 text-lg font-bold text-primary-foreground">
                   {s.step}
                 </div>
                 <h3 className="mb-1 font-semibold text-foreground">{s.title}</h3>
@@ -30,7 +30,7 @@ const PaymentScheme = () => {
           </div>
 
           {/* Payment Methods */}
-          <div className="mt-8 rounded-lg border border-border bg-background p-6">
+          <div className="glass-card mt-8 rounded-xl p-6">
             <h3 className="mb-4 text-center text-sm font-semibold text-foreground">Metode Pembayaran</h3>
             <div className="flex flex-wrap items-center justify-center gap-6">
               {[
