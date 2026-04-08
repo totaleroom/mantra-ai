@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Bot, RefreshCw, ShoppingBag, Utensils, Stethoscope, Wrench } from "lucide-react";
+import { Bot, RefreshCw, ShoppingBag, Utensils, Stethoscope, Wrench, Home, GraduationCap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
@@ -24,20 +24,11 @@ const INDUSTRIES: Industry[] = [
     businessName: "Lunestep Sneakers",
     messages: [
       { sender: "customer", text: "Halo kak, ada sneakers warna putih ukuran 42 ga?" },
-      {
-        sender: "ai",
-        text: "Halo kak! Ada dong 😊 Untuk ukuran 42 warna putih, kami punya:\n\n• Lunestep Classic — Rp389.000\n• Lunestep Air Pro — Rp549.000 ⭐ Best Seller\n\nMau lihat foto detailnya kak?",
-      },
+      { sender: "ai", text: "Halo kak! Ada dong 😊 Untuk ukuran 42 warna putih, kami punya:\n\n• Lunestep Classic — Rp389.000\n• Lunestep Air Pro — Rp549.000 ⭐ Best Seller\n\nMau lihat foto detailnya kak?" },
       { sender: "customer", text: "Air Pro dong kak, bisa COD ga ke Jakarta Selatan?" },
-      {
-        sender: "ai",
-        text: "Bisa banget kak! COD Jakarta Selatan tersedia ✅\n\nOngkir gratis untuk pembelian di atas Rp500.000, jadi kakak FREE ongkir ya! 🎉\n\nEstimasi sampai 1 sampai 2 hari kerja. Mau langsung diproses kak?",
-      },
+      { sender: "ai", text: "Bisa banget kak! COD Jakarta Selatan tersedia ✅\n\nOngkir gratis untuk pembelian di atas Rp500.000, jadi kakak FREE ongkir ya! 🎉\n\nEstimasi sampai 1 sampai 2 hari kerja. Mau langsung diproses kak?" },
       { sender: "customer", text: "Langsung aja kak, gimana caranya?" },
-      {
-        sender: "ai",
-        text: "Siap kak! 🛒\n\nRekap order:\n• Lunestep Air Pro 42 Putih — Rp549.000\n• Ongkir: GRATIS\n• Bayar: COD saat barang sampai\n\nBoleh kirim nama lengkap + alamat lengkap ya kak. Pesanan akan langsung kami proses hari ini! 📦",
-      },
+      { sender: "ai", text: "Siap kak! 🛒\n\nRekap order:\n• Lunestep Air Pro 42 Putih — Rp549.000\n• Ongkir: GRATIS\n• Bayar: COD saat barang sampai\n\nBoleh kirim nama lengkap + alamat lengkap ya kak. Pesanan akan langsung kami proses hari ini! 📦" },
     ],
   },
   {
@@ -47,20 +38,11 @@ const INDUSTRIES: Industry[] = [
     businessName: "Dapur Bunda Ani",
     messages: [
       { sender: "customer", text: "Halo kak, mau tanya dong. Ada bolu pandan ga?" },
-      {
-        sender: "ai",
-        text: "Halo kak! Ada dong 😊 Bolu Pandan Keju kami lagi best seller. Mau ukuran yang mana kak?\n\n• Mini (15cm) — Rp45.000\n• Regular (22cm) — Rp85.000",
-      },
+      { sender: "ai", text: "Halo kak! Ada dong 😊 Bolu Pandan Keju kami lagi best seller. Mau ukuran yang mana kak?\n\n• Mini (15cm) — Rp45.000\n• Regular (22cm) — Rp85.000" },
       { sender: "customer", text: "Regular aja kak. Bisa kirim ke Cilandak?" },
-      {
-        sender: "ai",
-        text: "Bisa banget kak! Ongkir ke Cilandak Rp15.000. Totalnya Rp100.000 ya 🛵\n\nMau dikirim kapan kak?",
-      },
+      { sender: "ai", text: "Bisa banget kak! Ongkir ke Cilandak Rp15.000. Totalnya Rp100.000 ya 🛵\n\nMau dikirim kapan kak?" },
       { sender: "customer", text: "Besok siang bisa kak? Sekitar jam 12" },
-      {
-        sender: "ai",
-        text: "Siap kak, besok siang jam 12 ya ✅\n\nRekap order:\n• Bolu Pandan Keju Regular — Rp85.000\n• Ongkir Cilandak — Rp15.000\n• Total: Rp100.000\n\nTransfer ke BCA 1234567890 a.n. Dapur Bunda Ani\nKonfirmasi setelah transfer ya kak! 🙏",
-      },
+      { sender: "ai", text: "Siap kak, besok siang jam 12 ya ✅\n\nRekap order:\n• Bolu Pandan Keju Regular — Rp85.000\n• Ongkir Cilandak — Rp15.000\n• Total: Rp100.000\n\nTransfer ke BCA 1234567890 a.n. Dapur Bunda Ani\nKonfirmasi setelah transfer ya kak! 🙏" },
     ],
   },
   {
@@ -70,20 +52,11 @@ const INDUSTRIES: Industry[] = [
     businessName: "Klinik Sehat Sentosa",
     messages: [
       { sender: "customer", text: "Halo, mau booking dokter gigi dong" },
-      {
-        sender: "ai",
-        text: "Halo kak! 😊 Untuk dokter gigi, kami ada jadwal berikut:\n\n🦷 drg. Amanda — Senin & Rabu (09:00-15:00)\n🦷 drg. Budi — Selasa & Kamis (13:00-20:00)\n\nMau pilih dokter yang mana kak?",
-      },
+      { sender: "ai", text: "Halo kak! 😊 Untuk dokter gigi, kami ada jadwal berikut:\n\n🦷 drg. Amanda — Senin & Rabu (09:00-15:00)\n🦷 drg. Budi — Selasa & Kamis (13:00-20:00)\n\nMau pilih dokter yang mana kak?" },
       { sender: "customer", text: "drg. Amanda hari Rabu bisa kak?" },
-      {
-        sender: "ai",
-        text: "drg. Amanda hari Rabu tersedia kak! ✅\n\nSlot yang masih kosong:\n• 09:00 ✅\n• 10:00 ✅\n• 11:00 ❌ (penuh)\n• 13:00 ✅\n• 14:00 ✅\n\nMau jam berapa kak?",
-      },
+      { sender: "ai", text: "drg. Amanda hari Rabu tersedia kak! ✅\n\nSlot yang masih kosong:\n• 09:00 ✅\n• 10:00 ✅\n• 11:00 ❌ (penuh)\n• 13:00 ✅\n• 14:00 ✅\n\nMau jam berapa kak?" },
       { sender: "customer", text: "Jam 10 pagi ya kak" },
-      {
-        sender: "ai",
-        text: "Booking berhasil! ✅\n\n📋 Detail Appointment:\n• Dokter: drg. Amanda\n• Hari: Rabu, 10:00 WIB\n• Biaya konsultasi: Rp150.000\n\nKakak akan dapat reminder H-1 ya. Mohon datang 15 menit sebelumnya untuk registrasi. Sampai jumpa kak! 🏥",
-      },
+      { sender: "ai", text: "Booking berhasil! ✅\n\n📋 Detail Appointment:\n• Dokter: drg. Amanda\n• Hari: Rabu, 10:00 WIB\n• Biaya konsultasi: Rp150.000\n\nKakak akan dapat reminder H-1 ya. Mohon datang 15 menit sebelumnya untuk registrasi. Sampai jumpa kak! 🏥" },
     ],
   },
   {
@@ -93,20 +66,39 @@ const INDUSTRIES: Industry[] = [
     businessName: "HomeServ Indonesia",
     messages: [
       { sender: "customer", text: "Kak, AC saya bocor nih. Bisa servis ga?" },
-      {
-        sender: "ai",
-        text: "Halo kak! Bisa banget 🔧\n\nUntuk AC bocor, biasanya perlu cuci + isi freon. Layanan kami:\n\n• Cuci AC — Rp100.000/unit\n• Isi Freon R32 — Rp250.000\n• Paket Lengkap — Rp300.000 (hemat Rp50.000) 💰\n\nAC-nya tipe apa kak? (1/2 PK, 1 PK, dll)",
-      },
+      { sender: "ai", text: "Halo kak! Bisa banget 🔧\n\nUntuk AC bocor, biasanya perlu cuci + isi freon. Layanan kami:\n\n• Cuci AC — Rp100.000/unit\n• Isi Freon R32 — Rp250.000\n• Paket Lengkap — Rp300.000 (hemat Rp50.000) 💰\n\nAC-nya tipe apa kak? (1/2 PK, 1 PK, dll)" },
       { sender: "customer", text: "1 PK kak, paket lengkap aja. Bisa besok?" },
-      {
-        sender: "ai",
-        text: "Siap kak! Untuk besok ada slot:\n\n🕘 09:00 - 11:00 ✅\n🕐 13:00 - 15:00 ✅\n🕓 16:00 - 18:00 ❌\n\nMau jam berapa kak? Teknisi kami berpengalaman 5+ tahun dan bergaransi 30 hari 👍",
-      },
+      { sender: "ai", text: "Siap kak! Untuk besok ada slot:\n\n🕘 09:00 - 11:00 ✅\n🕐 13:00 - 15:00 ✅\n🕓 16:00 - 18:00 ❌\n\nMau jam berapa kak? Teknisi kami berpengalaman 5+ tahun dan bergaransi 30 hari 👍" },
       { sender: "customer", text: "Pagi aja kak jam 9" },
-      {
-        sender: "ai",
-        text: "Booking berhasil! ✅\n\n📋 Detail Servis:\n• Paket Lengkap AC 1 PK — Rp300.000\n• Jadwal: Besok, 09:00 WIB\n• Garansi: 30 hari\n\nTeknisi akan hubungi kakak 30 menit sebelum datang. Pembayaran setelah servis selesai ya kak. Terima kasih! 🙏",
-      },
+      { sender: "ai", text: "Booking berhasil! ✅\n\n📋 Detail Servis:\n• Paket Lengkap AC 1 PK — Rp300.000\n• Jadwal: Besok, 09:00 WIB\n• Garansi: 30 hari\n\nTeknisi akan hubungi kakak 30 menit sebelum datang. Pembayaran setelah servis selesai ya kak. Terima kasih! 🙏" },
+    ],
+  },
+  {
+    id: "properti",
+    label: "Properti",
+    icon: Home,
+    businessName: "Griya Asri Residence",
+    messages: [
+      { sender: "customer", text: "Halo, mau tanya rumah tipe 45 masih ada ga?" },
+      { sender: "ai", text: "Halo kak! 🏡 Tipe 45 masih tersedia. Ada 2 lokasi:\n\n• Blok C-12 (hook) — Rp485 juta\n• Blok D-7 (standar) — Rp450 juta\n\nKeduanya sudah termasuk SHM. Mau info lebih detail atau jadwalkan survey kak?" },
+      { sender: "customer", text: "Yang hook berapa DP-nya kak? Bisa KPR?" },
+      { sender: "ai", text: "Bisa KPR kak! ✅ Kami sudah kerjasama dengan beberapa bank:\n\n💰 DP mulai 10% = Rp48,5 juta\n🏦 Cicilan estimasi Rp3,8 jt/bulan (tenor 20 thn)\n\nMau saya jadwalkan survey ke lokasi? Hari apa yang cocok kak?" },
+      { sender: "customer", text: "Sabtu ini bisa kak?" },
+      { sender: "ai", text: "Survey dijadwalkan! ✅\n\n📋 Detail:\n• Sabtu, 10:00 WIB\n• Lokasi: Griya Asri Residence, Blok C-12\n• Marketing: Pak Dedi (akan hubungi H-1)\n\nJangan lupa bawa KTP ya kak untuk registrasi. Sampai jumpa! 🏠" },
+    ],
+  },
+  {
+    id: "pendidikan",
+    label: "Kursus",
+    icon: GraduationCap,
+    businessName: "Bimba English Course",
+    messages: [
+      { sender: "customer", text: "Halo, mau daftarin anak saya kursus bahasa inggris" },
+      { sender: "ai", text: "Halo kak! 📚 Untuk anak usia berapa ya kak?\n\nKami ada program:\n• Kids (5-8 thn) — Rp350.000/bulan\n• Junior (9-12 thn) — Rp400.000/bulan\n• Teen (13-17 thn) — Rp450.000/bulan\n\nSemua include buku dan akses e-learning 😊" },
+      { sender: "customer", text: "Anak saya 7 tahun kak. Jadwalnya kapan aja?" },
+      { sender: "ai", text: "Untuk program Kids, jadwal yang tersedia:\n\n📅 Senin & Rabu (15:00-16:30)\n📅 Selasa & Kamis (15:00-16:30)\n📅 Sabtu (09:00-11:00)\n\nSemua kelas max 8 anak supaya lebih fokus. Pilih yang mana kak?" },
+      { sender: "customer", text: "Sabtu aja kak biar ga bentrok sekolah" },
+      { sender: "ai", text: "Pendaftaran berhasil! ✅\n\n📋 Detail:\n• Program: Kids English (7 thn)\n• Jadwal: Sabtu 09:00-11:00\n• Biaya: Rp350.000/bulan\n• Mulai: Sabtu depan\n\nTransfer ke BCA 9876543210 a.n. Bimba English Course. Setelah transfer, kirim buktinya ya kak. Kami siapkan bukunya! 📖" },
     ],
   },
 ];
@@ -175,12 +167,12 @@ const ChatDemo = () => {
   };
 
   return (
-    <section className="bg-background py-16 md:py-24">
+    <section className="py-16 md:py-24">
       <div className="container mx-auto px-4">
         <div className="mx-auto mb-8 max-w-2xl text-center">
           <h2 className="mb-3 text-3xl font-extrabold tracking-tight text-foreground md:text-4xl">
             Bukan Cuma Balas Chat,{" "}
-            <span className="text-primary">MANTRA Bisa Closing.</span>
+            <span className="gradient-text">MANTRA Bisa Closing.</span>
           </h2>
           <p className="text-sm text-muted-foreground">
             Pelanggan pikir ini admin manusia… padahal ini{" "}
@@ -189,14 +181,14 @@ const ChatDemo = () => {
         </div>
 
         {/* Industry Tabs */}
-        <div className="mx-auto mb-6 flex max-w-md justify-center gap-2 flex-wrap">
+        <div className="mx-auto mb-6 flex max-w-lg justify-center gap-2 flex-wrap">
           {INDUSTRIES.map((industry, i) => (
             <button
               key={industry.id}
               onClick={() => switchIndustry(i)}
-              className={`flex items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-semibold transition-all ${
+              className={`flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-all ${
                 activeIndustry === i
-                  ? "bg-primary text-primary-foreground shadow-md"
+                  ? "bg-gradient-to-r from-primary to-primary/80 text-primary-foreground shadow-md"
                   : "bg-secondary text-muted-foreground hover:bg-secondary/80"
               }`}
             >
@@ -208,9 +200,9 @@ const ChatDemo = () => {
 
         <div className="mx-auto max-w-md">
           {/* Chat window */}
-          <div className="overflow-hidden rounded-lg border border-border shadow-lg">
+          <div className="glass-card overflow-hidden rounded-xl shadow-xl">
             {/* Header */}
-            <div className="flex items-center gap-3 bg-primary px-4 py-3">
+            <div className="flex items-center gap-3 bg-gradient-to-r from-primary to-primary/80 px-4 py-3">
               <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary-foreground/20">
                 <Bot size={18} className="text-primary-foreground" />
               </div>

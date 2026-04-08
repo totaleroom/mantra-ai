@@ -4,32 +4,38 @@ import { Button } from "@/components/ui/button";
 const Hero = () => {
   return (
     <section className="relative overflow-hidden py-16 md:py-24">
-      <div className="container mx-auto px-4">
+      {/* Decorative background */}
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute -top-32 right-0 h-96 w-96 rounded-full bg-primary/5 blur-3xl animate-float" />
+        <div className="absolute bottom-0 -left-32 h-80 w-80 rounded-full bg-accent/5 blur-3xl animate-float-delayed" />
+      </div>
+
+      <div className="container relative mx-auto px-4">
         <div className="grid items-center gap-12 lg:grid-cols-2">
           {/* Left Content */}
           <div className="max-w-xl">
-            <p className="mb-6 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            <p className="mb-6 inline-block rounded-lg bg-primary/10 px-3 py-1 text-sm font-semibold text-primary">
               Asisten Digital untuk Usaha Anda
             </p>
 
             <h1 className="mb-6 text-4xl font-extrabold leading-[1.1] tracking-tight text-foreground md:text-5xl lg:text-6xl">
               Bukan Cuma Balas Chat.{" "}
-              <span className="text-primary">MANTRA Bisa Closing Penjualan.</span>
+              <span className="gradient-text">MANTRA Bisa Closing Penjualan.</span>
             </h1>
 
             <p className="mb-8 text-lg leading-relaxed text-muted-foreground">
-              AI yang beneran bisa eksekusi: closing, booking, cek ongkir, terima pembayaran. 
+              AI yang beneran bisa eksekusi: closing, booking, cek ongkir, terima pembayaran.
               Kualitas setara sales terbaik, kerja 24/7 tanpa libur.
             </p>
 
             <div className="flex flex-wrap gap-3">
-              <Button size="lg" className="gap-2 text-base" asChild>
+              <Button size="lg" variant="premium" className="gap-2" asChild>
                 <a href="https://wa.me/6282125086328" target="_blank" rel="noopener noreferrer">
                   Konsultasi Gratis 15 Menit
                   <ArrowRight size={18} />
                 </a>
               </Button>
-              <Button size="lg" variant="outline" className="text-base" asChild>
+              <Button size="lg" variant="outline" asChild>
                 <a href="#solusi">Pelajari Selengkapnya</a>
               </Button>
             </div>
@@ -37,17 +43,17 @@ const Hero = () => {
 
           {/* Right — Dashboard Mock */}
           <div className="relative">
-            <div className="rounded-lg border border-border bg-card p-6 shadow-xl">
+            <div className="glass-card rounded-xl p-6 shadow-xl">
               <div className="mb-4 flex items-center gap-2">
                 <div className="h-3 w-3 rounded-full bg-destructive/60" />
                 <div className="h-3 w-3 rounded-full bg-primary/60" />
                 <div className="h-3 w-3 rounded-full bg-accent/60" />
-                <span className="ml-2 font-mono text-xs text-muted-foreground">Pusat Kontrol</span>
+                <span className="ml-2 text-xs font-medium text-muted-foreground">Pusat Kontrol</span>
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
                 {/* Before */}
-                <div className="rounded-lg border border-destructive/20 bg-destructive/5 p-4">
+                <div className="rounded-lg bg-destructive/5 p-4">
                   <p className="mb-2 text-xs font-semibold uppercase text-destructive">Sebelum MANTRA</p>
                   <ul className="space-y-2 text-sm text-muted-foreground">
                     <li className="flex items-start gap-2">
@@ -63,7 +69,7 @@ const Hero = () => {
                 </div>
 
                 {/* After */}
-                <div className="rounded-lg border border-accent/20 bg-accent/5 p-4">
+                <div className="rounded-lg bg-accent/5 p-4">
                   <p className="mb-2 text-xs font-semibold uppercase text-accent">Sesudah MANTRA</p>
                   <ul className="space-y-2 text-sm text-muted-foreground">
                     <li className="flex items-start gap-2">
@@ -81,18 +87,16 @@ const Hero = () => {
 
               {/* Stats */}
               <div className="mt-4 grid grid-cols-3 gap-3">
-                <div className="rounded-md bg-secondary p-3 text-center">
-                  <p className="font-mono text-lg font-bold text-foreground">87%</p>
-                  <p className="text-xs text-muted-foreground">Chat Otomatis</p>
-                </div>
-                <div className="rounded-md bg-secondary p-3 text-center">
-                  <p className="font-mono text-lg font-bold text-foreground">3.2 jam</p>
-                  <p className="text-xs text-muted-foreground">Dihemat/Hari</p>
-                </div>
-                <div className="rounded-md bg-secondary p-3 text-center">
-                  <p className="font-mono text-lg font-bold text-foreground">↑ 42%</p>
-                  <p className="text-xs text-muted-foreground">Konversi</p>
-                </div>
+                {[
+                  { val: "87%", label: "Chat Otomatis" },
+                  { val: "3.2 jam", label: "Dihemat/Hari" },
+                  { val: "↑ 42%", label: "Konversi" },
+                ].map((s) => (
+                  <div key={s.label} className="rounded-lg bg-gradient-to-br from-secondary to-secondary/50 p-3 text-center">
+                    <p className="text-lg font-bold text-foreground">{s.val}</p>
+                    <p className="text-xs text-muted-foreground">{s.label}</p>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
@@ -106,8 +110,8 @@ const Hero = () => {
             { icon: Bot, value: "30+", label: "UMKM terlayani" },
             { icon: ArrowRight, value: "<3 dtk", label: "Waktu respons chat" },
           ].map((stat) => (
-            <div key={stat.label} className="flex items-center gap-3 rounded-lg bg-card p-4">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+            <div key={stat.label} className="glass-card flex items-center gap-3 rounded-xl p-4">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary/20 to-primary/5">
                 <stat.icon size={20} className="text-primary" />
               </div>
               <div>

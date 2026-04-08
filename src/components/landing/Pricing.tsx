@@ -40,7 +40,7 @@ const formatRp = (n: number) =>
 
 const Pricing = () => {
   return (
-    <section id="harga" className="py-16 md:py-24">
+    <section id="harga" className="section-gradient py-16 md:py-24">
       <div className="container mx-auto px-4">
         <div className="mx-auto mb-10 max-w-2xl text-center">
           <h2 className="mb-4 text-3xl font-extrabold tracking-tight text-foreground md:text-4xl">
@@ -52,12 +52,12 @@ const Pricing = () => {
           {plans.map((plan) => (
             <Card
               key={plan.name}
-              className={`relative overflow-hidden transition-shadow hover:shadow-lg ${
-                plan.popular ? "border-2 border-primary shadow-lg" : ""
+              className={`relative overflow-hidden transition-all duration-300 hover:shadow-xl ${
+                plan.popular ? "border-2 border-primary shadow-lg glow-primary" : "border-border/50"
               }`}
             >
               {plan.popular && (
-                <div className="absolute right-0 top-0 rounded-bl-lg bg-primary px-3 py-1 text-xs font-bold text-primary-foreground">
+                <div className="absolute right-0 top-0 rounded-bl-lg bg-gradient-to-r from-primary to-primary/80 px-3 py-1 text-xs font-bold text-primary-foreground">
                   PALING POPULER
                 </div>
               )}
@@ -67,14 +67,14 @@ const Pricing = () => {
                 </h3>
 
                 <div className="mt-3 flex items-baseline gap-1">
-                  <span className="text-4xl font-extrabold text-foreground">
+                  <span className="text-4xl font-extrabold gradient-text">
                     {formatRp(plan.price)}
                   </span>
                   <span className="text-sm text-muted-foreground">/bulan</span>
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">+ Setup {formatRp(plan.setup)} (sekali bayar)</p>
 
-                <p className="mt-4 rounded-md bg-secondary px-3 py-2 text-xs font-medium text-muted-foreground">
+                <p className="mt-4 rounded-lg bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground">
                   {plan.target}
                 </p>
 
@@ -95,7 +95,7 @@ const Pricing = () => {
 
                 <Button
                   className="mt-6 w-full gap-2"
-                  variant={plan.popular ? "default" : "outline"}
+                  variant={plan.popular ? "premium" : "outline"}
                   asChild
                 >
                   <a href="https://wa.me/6282125086328" target="_blank" rel="noopener noreferrer">

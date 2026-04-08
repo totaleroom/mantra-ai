@@ -25,7 +25,7 @@ const AdminCostCalculator = () => {
   const savings = adminCost - MANTRA_COST;
 
   return (
-    <section className="bg-card py-16 md:py-24">
+    <section className="section-gradient py-16 md:py-24">
       <div className="container mx-auto px-4">
         <div className="mx-auto mb-12 max-w-2xl text-center">
           <h2 className="mb-4 text-3xl font-extrabold tracking-tight text-foreground md:text-4xl">
@@ -42,9 +42,9 @@ const AdminCostCalculator = () => {
             <button
               key={city.name}
               onClick={() => setSelectedCity(i)}
-              className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+              className={`rounded-lg px-4 py-2 text-sm font-medium transition-all ${
                 selectedCity === i
-                  ? "bg-primary text-primary-foreground"
+                  ? "bg-gradient-to-r from-primary to-primary/80 text-primary-foreground shadow-md"
                   : "bg-secondary text-secondary-foreground hover:bg-secondary/80"
               }`}
             >
@@ -55,7 +55,7 @@ const AdminCostCalculator = () => {
 
         <div className="mx-auto max-w-3xl">
           {/* Slider */}
-          <div className="mb-8">
+          <div className="glass-card mb-8 rounded-xl p-6">
             <div className="mb-2 flex items-center justify-between">
               <span className="text-sm font-medium text-foreground">Jumlah Admin</span>
               <span className="text-lg font-bold text-primary">{adminCount[0]} orang</span>
@@ -65,7 +65,7 @@ const AdminCostCalculator = () => {
 
           {/* Comparison Cards */}
           <div className="grid gap-4 sm:grid-cols-2">
-            <Card className="border-destructive/20">
+            <Card className="border-destructive/20 bg-gradient-to-br from-destructive/5 to-transparent">
               <CardContent className="p-6">
                 <div className="mb-3 flex items-center gap-2">
                   <Building2 size={18} className="text-destructive" />
@@ -78,7 +78,7 @@ const AdminCostCalculator = () => {
               </CardContent>
             </Card>
 
-            <Card className="border-accent/20">
+            <Card className="border-accent/20 bg-gradient-to-br from-accent/5 to-transparent">
               <CardContent className="p-6">
                 <div className="mb-3 flex items-center gap-2">
                   <TrendingDown size={18} className="text-accent" />
@@ -91,9 +91,9 @@ const AdminCostCalculator = () => {
           </div>
 
           {/* Savings */}
-          <div className="mt-6 rounded-lg border border-primary/20 bg-primary/5 p-6 text-center">
+          <div className="mt-6 rounded-xl bg-gradient-to-r from-primary/10 via-primary/5 to-transparent p-6 text-center border border-primary/20">
             <p className="text-sm font-medium text-muted-foreground">Anda hemat hingga</p>
-            <p className="mt-1 text-4xl font-extrabold text-primary">{formatRp(savings)}</p>
+            <p className="mt-1 text-4xl font-extrabold gradient-text">{formatRp(savings)}</p>
             <p className="mt-1 text-sm text-muted-foreground">per bulan</p>
           </div>
         </div>

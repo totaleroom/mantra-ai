@@ -15,7 +15,7 @@ const Navbar = () => {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
-    <nav className="sticky top-0 z-50 border-b border-border/50 bg-background/80 backdrop-blur-lg">
+    <nav className="sticky top-0 z-50 border-b border-border/30 bg-background/70 backdrop-blur-xl">
       <div className="container mx-auto flex h-16 items-center justify-between px-4">
         {/* Logo */}
         <a href="#" className="flex items-center">
@@ -37,10 +37,10 @@ const Navbar = () => {
 
         {/* Desktop Actions */}
         <div className="hidden items-center gap-3 md:flex">
-          <Button variant="outline" size="sm" asChild>
+          <Button variant="ghost" size="sm" asChild>
             <Link to="/login">Juragan</Link>
           </Button>
-          <Button size="sm" asChild>
+          <Button size="sm" variant="premium" asChild>
             <a href="https://wa.me/6282125086328" target="_blank" rel="noopener noreferrer">
               Konsultasi Gratis
             </a>
@@ -55,7 +55,7 @@ const Navbar = () => {
 
       {/* Mobile Menu */}
       {mobileOpen && (
-        <div className="border-t border-border bg-background px-4 pb-4 md:hidden">
+        <div className="border-t border-border/30 bg-background/95 backdrop-blur-xl px-4 pb-4 md:hidden">
           <div className="flex flex-col gap-3 pt-3">
             {navLinks.map((link) => (
               <a
@@ -71,7 +71,7 @@ const Navbar = () => {
               <Button variant="outline" size="sm" asChild>
                 <Link to="/login">Juragan</Link>
               </Button>
-              <Button size="sm" asChild>
+              <Button size="sm" variant="premium" asChild>
                 <a href="https://wa.me/6282125086328" target="_blank" rel="noopener noreferrer">
                   Konsultasi Gratis
                 </a>

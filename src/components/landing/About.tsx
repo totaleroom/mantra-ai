@@ -41,7 +41,7 @@ const About = () => {
         <div className="mx-auto mb-12 max-w-2xl text-center">
           <p className="mb-3 text-sm font-semibold text-primary">Tentang Kami</p>
           <h2 className="mb-4 text-3xl font-extrabold tracking-tight text-foreground md:text-4xl">
-            Kami Paham <span className="text-primary">Sakitnya</span> Bisnis Anda
+            Kami Paham <span className="gradient-text">Sakitnya</span> Bisnis Anda
           </h2>
           <p className="text-muted-foreground">
             MANTRA lahir dari frustrasi melihat owner UMKM yang kerja mati-matian tapi tetap kewalahan.
@@ -57,7 +57,7 @@ const About = () => {
           </h3>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {painPoints.map((p) => (
-              <div key={p.title} className="rounded-lg border border-destructive/20 bg-destructive/5 p-5">
+              <div key={p.title} className="rounded-lg border border-destructive/15 bg-gradient-to-br from-destructive/5 to-transparent p-5 transition-all hover:shadow-md">
                 <div className="mb-3 flex items-center gap-3">
                   <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-destructive/10">
                     <p.icon size={18} className="text-destructive" />
@@ -73,8 +73,8 @@ const About = () => {
         {/* Values */}
         <div className="mb-12 grid gap-6 md:grid-cols-3">
           {values.map((v) => (
-            <div key={v.title} className="rounded-lg border border-border bg-card p-6">
-              <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
+            <div key={v.title} className="glass-card rounded-xl p-6 transition-all hover:shadow-lg">
+              <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-gradient-to-br from-primary/20 to-primary/5">
                 <v.icon size={24} className="text-primary" />
               </div>
               <h3 className="mb-2 text-lg font-bold text-foreground">{v.title}</h3>
@@ -86,8 +86,8 @@ const About = () => {
         {/* Stats */}
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
           {stats.map((s) => (
-            <div key={s.label} className="rounded-lg border border-border bg-card p-5 text-center">
-              <p className="text-3xl font-extrabold text-primary">{s.value}</p>
+            <div key={s.label} className="glass-card rounded-xl p-5 text-center">
+              <p className="text-3xl font-extrabold gradient-text">{s.value}</p>
               <p className="mt-1 text-sm text-muted-foreground">{s.label}</p>
             </div>
           ))}

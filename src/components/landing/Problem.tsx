@@ -25,12 +25,12 @@ const problems = [
 
 const Problem = () => {
   return (
-    <section id="masalah" className="py-16 md:py-24">
+    <section id="masalah" className="section-gradient py-16 md:py-24">
       <div className="container mx-auto px-4">
         <div className="mx-auto mb-12 max-w-2xl text-center">
           <h2 className="mb-4 text-3xl font-extrabold tracking-tight text-foreground md:text-4xl">
             CS Manusia Punya Batas.{" "}
-            <span className="text-primary">MANTRA Tidak.</span>
+            <span className="gradient-text">MANTRA Tidak.</span>
           </h2>
           <p className="text-muted-foreground">
             Karyawan bisa capek, bad mood, lupa SOP. MANTRA selalu ramah, patuh, dan tahu cara menangani pelanggan yang marah sekalipun.
@@ -45,7 +45,7 @@ const Problem = () => {
               CS Manusia
             </h3>
             {problems.map((p, i) => (
-              <div key={i} className="flex items-start gap-3 rounded-lg border border-destructive/10 bg-destructive/5 p-4">
+              <div key={i} className="flex items-start gap-3 rounded-lg border border-destructive/10 bg-destructive/5 p-4 transition-all hover:shadow-md hover:border-destructive/20">
                 <p.icon size={20} className="mt-0.5 shrink-0 text-destructive/70" />
                 <p className="text-sm text-foreground/80">{p.old}</p>
               </div>
@@ -59,7 +59,7 @@ const Problem = () => {
               Cara MANTRA
             </h3>
             {problems.map((p, i) => (
-              <div key={i} className="flex items-start gap-3 rounded-lg border border-accent/10 bg-accent/5 p-4">
+              <div key={i} className="flex items-start gap-3 rounded-lg border border-accent/10 bg-accent/5 p-4 transition-all hover:shadow-md hover:border-accent/20">
                 <p.icon size={20} className="mt-0.5 shrink-0 text-accent" />
                 <p className="text-sm text-foreground/80">{p.new}</p>
               </div>

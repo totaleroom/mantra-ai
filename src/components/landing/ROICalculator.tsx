@@ -17,7 +17,7 @@ const ROICalculator = () => {
     new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(n);
 
   return (
-    <section className="bg-card py-16 md:py-24">
+    <section className="py-16 md:py-24">
       <div className="container mx-auto px-4">
         <div className="mx-auto mb-12 max-w-2xl text-center">
           <p className="mb-3 text-sm font-semibold text-primary">Kalkulator ROI</p>
@@ -27,7 +27,7 @@ const ROICalculator = () => {
         </div>
 
         <div className="mx-auto max-w-2xl">
-          <div className="mb-8 rounded-lg border border-border bg-background p-6">
+          <div className="glass-card mb-8 rounded-xl p-6">
             <div className="mb-2 flex items-center justify-between">
               <span className="text-sm font-medium text-foreground">Jam dihabiskan untuk admin per hari</span>
               <span className="text-lg font-bold text-primary">{hoursPerDay[0]} jam</span>
@@ -42,9 +42,9 @@ const ROICalculator = () => {
               { icon: Calculator, label: "Net savings/bulan", value: formatRp(netSavings) },
               { icon: TrendingUp, label: "ROI", value: `${roi}%` },
             ].map((item) => (
-              <div key={item.label} className="rounded-lg border border-border bg-background p-4 text-center">
+              <div key={item.label} className="glass-card rounded-xl p-4 text-center">
                 <item.icon size={20} className="mx-auto mb-2 text-primary" />
-                <p className="text-xl font-bold text-foreground truncate">{item.value}</p>
+                <p className="text-xl font-bold gradient-text truncate">{item.value}</p>
                 <p className="mt-1 text-xs text-muted-foreground">{item.label}</p>
               </div>
             ))}
